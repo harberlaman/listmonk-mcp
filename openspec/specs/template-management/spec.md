@@ -27,7 +27,7 @@ The `set_default_template` tool SHALL mark the given template as the default for
 
 #### Scenario: Make a template the default
 - **WHEN** `set_default_template` is called with an existing template ID
-- **THEN** Listmonk reports that template as the default, and the tool returns a confirmation naming the template ID
+- **THEN** Listmonk reports that template as the default, and the tool returns Listmonk's response
 
 ### Requirement: Preview an unsaved template body
 The `preview_template_body` tool SHALL render a template body that has not been saved, for a given template type (default `campaign`), using `POST /api/templates/preview` with the form fields `body` and `template_type`, and return the rendered output.
@@ -39,3 +39,14 @@ The `preview_template_body` tool SHALL render a template body that has not been 
 #### Scenario: Preview fails on a template error
 - **WHEN** the body has a template syntax error
 - **THEN** the tool returns an error message containing Listmonk's error text instead of rendered HTML
+
+### Requirement: Create a template with a subject
+The `create_template` tool SHALL accept `name`, `body`, `type` (`campaign`, `campaign_visual` or `tx`, default `campaign`), `subject` and `is_default`, and create the template via `POST /api/templates`. A `tx` template without a non-empty `subject` SHALL be rejected before any request is sent. The template type can't be changed later, and the tool documentation SHALL say so.
+
+#### Scenario: Create a tx template
+- **WHEN** `create_template` is called with `type="tx"`, `subject="Message from IT"` and a body
+- **THEN** the POST body carries `type: "tx"` and that subject, and the result is Listmonk's response with the new template's `id`
+
+#### Scenario: tx template without subject
+- **WHEN** `create_template` is called with `type="tx"` and no subject
+- **THEN** no request is sent, and the tool returns an MCP error saying transactional templates need a subject
