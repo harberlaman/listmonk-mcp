@@ -64,7 +64,8 @@
 
 ## 5. Publish to the fork
 
-- [ ] 5.1 Push `master` to `origin` (`harberlaman/listmonk-mcp`) with no tags. Verify: `git status -sb` shows `master` level with `origin/master`, and `git ls-remote --tags origin` lists no new `v*` tag.
+- [x] 5.1 Push `master` to `origin` (`harberlaman/listmonk-mcp`) with no tags. Verify: `git status -sb` shows `master` level with `origin/master`, and `git ls-remote --tags origin` lists no new `v*` tag.
+  - Pushed `be5fe5b..e11f492`. `master` is level with `origin/master`, and the remote tags are only the inherited `v0.0.1`, `v0.0.2` and `v0.1.0`.
 - [x] 5.2 Collect every `NOTE:` that wasn't fixed (including `import_subscribers` repeating P3) into a short list at the end of this file, as input for the fix and guardrails changes. Verify: the list exists.
   - Done: see "Carried forward" below.
 
