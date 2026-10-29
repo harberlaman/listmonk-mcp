@@ -1,7 +1,5 @@
 """The shared HTTP client sends the right Content-Type per request (no client-wide default)."""
 
-from pathlib import Path
-
 from pytest_httpx import HTTPXMock
 
 from listmonk_mcp.client import ListmonkClient
@@ -29,12 +27,10 @@ async def test_form_request(client: ListmonkClient, httpx_mock: HTTPXMock) -> No
     assert request.headers["Content-Type"] == "application/x-www-form-urlencoded"
 
 
-async def test_multipart_request(client: ListmonkClient, httpx_mock: HTTPXMock, tmp_path: Path) -> None:
-    csv = tmp_path / "subs.csv"
-    csv.write_text("email,name\na@example.com,A\n")
+async def test_multipart_request(client: ListmonkClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(method="POST", url=f"{BASE_URL}/api/import/subscribers", json={"data": {"status": "importing"}})
 
-    await client.import_subscribers(str(csv), list_ids=[1])
+    await client.import_subscribers("subs.csv", b"email,name\na@example.com,A\n", "text/csv", list_ids=[1])
 
     request = httpx_mock.get_request()
     assert request is not None

@@ -18,7 +18,13 @@ from .exceptions import (
     ValidationError,
     run_tool,
 )
-from .uploads import MEDIA_EXTENSIONS, MEDIA_MAX_BYTES, resolve_upload
+from .uploads import (
+    IMPORT_EXTENSIONS,
+    IMPORT_MAX_BYTES,
+    MEDIA_EXTENSIONS,
+    MEDIA_MAX_BYTES,
+    resolve_upload,
+)
 
 # Global state
 _client: ListmonkClient | None = None
@@ -587,28 +593,39 @@ async def blocklist_bounced_subscribers() -> str:
 # Subscriber Import Tools
 @mcp.tool()
 async def import_subscribers(
-    file_path: str,
     list_ids: list[int],
+    content_base64: str | None = None,
+    filename: str | None = None,
+    file_path: str | None = None,
     mode: str = "subscribe",
     delim: str = ",",
     overwrite: bool = True,
     subscription_status: str = "confirmed",
 ) -> str:
     """
-    Start a subscriber import from a CSV or .zip file.
+    Start a subscriber import from a CSV or .zip file (at most 10 MB).
+
+    Give the file either as content_base64 + filename (works for remote clients) or
+    as file_path on the machine running this server - exactly one of the two.
 
     Args:
-        file_path: Absolute path to a .csv or .zip file.
         list_ids: Lists to subscribe imported users to.
+        content_base64: The file's bytes, base64-encoded.
+        filename: File name with extension (.csv or .zip), required with content_base64.
+        file_path: Path to a .csv or .zip file on the server's filesystem.
         mode: "subscribe" (default) or "blocklist".
         delim: CSV delimiter (default ",").
         overwrite: Whether to overwrite existing subscribers.
         subscription_status: "confirmed" or "unconfirmed".
     """
     async def _import_logic() -> str:
+        upload = resolve_upload(content_base64=content_base64, filename=filename, file_path=file_path,
+                                allowed_extensions=IMPORT_EXTENSIONS, max_bytes=IMPORT_MAX_BYTES)
         client = get_client()
         result = await client.import_subscribers(
-            file_path=file_path,
+            upload.filename,
+            upload.content,
+            upload.content_type,
             mode=mode,
             list_ids=list_ids,
             delim=delim,

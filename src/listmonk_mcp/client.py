@@ -1,6 +1,7 @@
 """Listmonk API client abstraction using httpx."""
 
 import asyncio
+import json
 from typing import Any
 from urllib.parse import urljoin
 
@@ -399,36 +400,27 @@ class ListmonkClient:
 
     async def import_subscribers(
         self,
-        file_path: str,
+        filename: str,
+        content: bytes,
+        content_type: str,
         mode: str = "subscribe",
         list_ids: list[int] | None = None,
         delim: str = ",",
         overwrite: bool = True,
         subscription_status: str = "confirmed",
     ) -> dict[str, Any]:
-        """Start a subscriber import from a CSV/zip file.
+        """Start a subscriber import from a CSV/zip file (already checked by uploads.resolve_upload).
 
         Args:
-            file_path: Local path to a .csv or .zip file.
+            filename: Name of the .csv or .zip file.
+            content: The file's bytes.
+            content_type: MIME type of the file.
             mode: "subscribe" or "blocklist".
             list_ids: Lists to subscribe imported users to.
             delim: CSV delimiter (default ",").
             overwrite: Whether to overwrite existing subscribers.
             subscription_status: "confirmed" or "unconfirmed".
         """
-        import json as _json
-        from pathlib import Path
-
-        file_path_obj = Path(file_path)
-        if not file_path_obj.exists():
-            raise ListmonkAPIError(f"File not found: {file_path}")
-
-        ext = file_path_obj.suffix.lower()
-        content_type = "application/zip" if ext == ".zip" else "text/csv"
-
-        with open(file_path, "rb") as f:
-            file_content = f.read()
-
         params = {
             "mode": mode,
             "subscription_status": subscription_status,
@@ -436,9 +428,8 @@ class ListmonkClient:
             "lists": list_ids or [],
             "overwrite": overwrite,
         }
-
-        files = [("file", (file_path_obj.name, file_content, content_type))]
-        form = {"params": _json.dumps(params)}
+        files = [("file", (filename, content, content_type))]
+        form = {"params": json.dumps(params)}
         return await self._request("POST", "/api/import/subscribers", form_data=form, files=files)
 
     async def stop_import(self) -> dict[str, Any]:
