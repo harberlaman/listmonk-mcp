@@ -47,9 +47,23 @@
 
 ## 6. Integration checks
 
-- [ ] 6.1 Run `uv run ruff check src/ tests/ && uv run mypy src/ && uv build && uv run pytest`. Verify: all pass.
-- [ ] 6.2 Live run on the local Docker engine (`--context default`): Listmonk `v6.2.0` plus `axllent/mailpit`, ports on `127.0.0.1` only, with Listmonk's SMTP pointed at mailpit. Over stdio, check that the server lists 70 tools (with `upload_media` and without `rename_media`), 5 resources and 8 templates; create a tx template with a subject; send a tx message with `subject`, `from_email`, `X-Training-ID: TEST-01` and one attachment, then confirm in mailpit's API that the message arrived with that header and attachment; send in `external` mode to a non-subscriber; upload a PNG with `upload_media` and get a `url`; import a CSV with `content_base64`; list subscribers with lists shown; health shows v6.2.0; a failing call shows `isError`. Tear the stack down afterwards. Verify: each check is recorded here as pass, or fail with a `NOTE:`.
-- [ ] 6.3 Update `CLAUDE.md`: the `run_tool`, `ValidationError` and `ToolError` error pattern; write tools returning `listmonk_json`; the single `FastMCP` with resources served; no default `Content-Type`; the upload helper. Verify: the documented test commands run.
+- [x] 6.1 Run `uv run ruff check src/ tests/ && uv run mypy src/ && uv build && uv run pytest`. Verify: all pass.
+  - ruff (src and tests) passes, mypy passes on 7 files, `uv build` produces `listmonk_mcp-0.2.0`, pytest: 86 passed.
+- [x] 6.2 Live run on the local Docker engine (`--context default`): Listmonk `v6.2.0` plus `axllent/mailpit`, ports on `127.0.0.1` only, with Listmonk's SMTP pointed at mailpit. Over stdio, check that the server lists 70 tools (with `upload_media` and without `rename_media`), 5 resources and 8 templates; create a tx template with a subject; send a tx message with `subject`, `from_email`, `X-Training-ID: TEST-01` and one attachment, then confirm in mailpit's API that the message arrived with that header and attachment; send in `external` mode to a non-subscriber; upload a PNG with `upload_media` and get a `url`; import a CSV with `content_base64`; list subscribers with lists shown; health shows v6.2.0; a failing call shows `isError`. Tear the stack down afterwards. Verify: each check is recorded here as pass, or fail with a `NOTE:`.
+  - Ran on the local Docker engine only. Stack `lm-fct-test`: `listmonk/listmonk:v6.2.0`, `postgres:17-alpine` and `axllent/mailpit:v1.27`, bound to `127.0.0.1`. Listmonk's SMTP pointed at mailpit. The driver (outside the repo) ran the real `listmonk-mcp` over stdio. **17/17 passed:**
+    - 70 tools (`upload_media` present, `rename_media` absent), 5 resources and 8 templates, and `listmonk://lists` reads
+    - health shows `Version: v6.2.0`; write tools return JSON with the new `id`
+    - tx template created with a subject; without one it's an MCP error
+    - **tx send delivered to mailpit** with `X-Training-Id: TEST-01`, subject and From overrides, `guide.pdf` attached and `data.content` rendered; the tool returned `{"data": true}`
+    - `external` mode delivered to a non-subscriber; IDs in `external` mode rejected
+    - `upload_media` returned a `url` and the image is served (200); `.svg` rejected
+    - CSV imported from `content_base64` (2 imported); a missing `file_path` is a clean `ValidationError`, with no `NoneType`
+    - `get_list_subscribers_tool` shows records with lists and subscription status, and "3 total"
+    - a failing call is `isError` with no traceback
+  - Test-setup issues, not product issues: my compose file lacked the `uploads` folder the stock compose mounts (Listmonk returned 500, which the tool correctly reported as `isError`); after `mkdir`, the upload passed. Media URLs are built from Listmonk's `root_url` setting, so production's `root_url` must be the public address for the returned URLs to work in emails.
+  - Torn down with `down -v`; credential files deleted.
+- [x] 6.3 Update `CLAUDE.md`: the `run_tool`, `ValidationError` and `ToolError` error pattern; write tools returning `listmonk_json`; the single `FastMCP` with resources served; no default `Content-Type`; the upload helper. Verify: the documented test commands run.
+  - Architecture and conventions rewritten: the single `FastMCP`, no default `Content-Type`, `uploads.py`, `run_tool`/`ValidationError`/`ToolError`, `listmonk_json` for writes, `format_subscribers`, keeping the registration count up to date, the response-shape notes (`/api/about`, no media update route) and `root_url` for media URLs. The documented single-test command and the full suite run (86 passed).
 - [ ] 6.4 Commit to `master` and push with no tags. Before pushing, scan the outgoing history for internal host and container names. Verify: `git status -sb` is level with `origin/master`, and the scan finds nothing.
 
 ## Workflow follow-up

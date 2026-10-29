@@ -39,23 +39,25 @@ Local Listmonk for manual testing: `docker compose -f docs/listmonk-docker-compo
 
 Layers, in call order:
 
-1. **`server.py`** (~2.4k lines, 70 tools and 13 resources, almost all of the surface area)
-   - A module-level `mcp = FastMCP(...)` is used only as a registration target for `@mcp.tool()` / `@mcp.resource()` decorators.
-   - `create_production_server()` builds a second `FastMCP` with the `lifespan` context manager and copies tools over by reaching into the private `mcp._tool_manager._tools`. **Only tools are copied — resources registered on `mcp` are not transferred to the production server.** Keep this in mind when adding resources or upgrading the `mcp` package (private API).
+1. **`server.py`** (~2.5k lines, 70 tools, 5 resources and 8 resource templates, almost all of the surface area)
+   - A single module-level `mcp = FastMCP("Listmonk MCP Server", lifespan=lifespan)`; `@mcp.tool()` / `@mcp.resource()` register directly on the server that runs. `create_production_server()` just returns it. The lifespan only runs when the server starts, so importing the module connects to nothing.
    - `lifespan` loads config, creates/connects the global `_client`, and closes it on shutdown. Tools access it via `get_client()` / `get_config()` module globals.
    - The typer `cli_app` (`main()` entry point) calls `create_production_server().run()`.
 
-2. **`client.py`** — `ListmonkClient`, async httpx wrapper with one method per Listmonk endpoint. `connect()` performs a health check, so the server fails at startup if Listmonk is unreachable or credentials are wrong. `_request()` retries only on `httpx.RequestError` (network errors) with exponential backoff; non-2xx responses raise `ListmonkAPIError` immediately. `json_data` is typed `Any` because some endpoints (e.g. `PUT /api/settings/{key}`) take a raw JSON value, not an object; pass `form_data` instead for endpoints that read form fields (e.g. `POST /api/templates/preview`). Non-JSON responses (HTML previews) come back as `{"text": ...}`.
+2. **`client.py`**: `ListmonkClient`, an async httpx wrapper with one method per Listmonk endpoint. `connect()` performs a health check, so the server fails at startup if Listmonk is unreachable or credentials are wrong. `_request()` retries only on `httpx.RequestError` (network errors) with exponential backoff; non-2xx responses raise `ListmonkAPIError` immediately. The shared client sets **no default `Content-Type`**: `_request` sends `json_data` as JSON (typed `Any`, because e.g. `PUT /api/settings/{key}` takes a raw value), `form_data` form-encoded, and `form_data` + `files` as multipart. All uploads go through it; don't create one-off `AsyncClient`s. Non-JSON responses (HTML previews) come back as `{"text": ...}`.
 
-3. **`exceptions.py`** — `ListmonkMCPError` hierarchy plus HTTP status mapping. Imports `ListmonkAPIError` from `client.py` (dependency goes exceptions → client).
+3. **`exceptions.py`**: `ListmonkMCPError` hierarchy, the HTTP status mapper (handles `status_code=None` and keeps Listmonk's message), and `run_tool`. Imports `ListmonkAPIError` from `client.py` (dependency goes exceptions → client).
 
-4. **`models.py`** — Pydantic models/enums. Re-exported from `__init__.py` but **not used by `server.py` or `client.py`**; tools take primitive args and the client returns raw `dict[str, Any]`.
+4. **`uploads.py`**: `resolve_upload` (exactly one of `content_base64` + `filename` or `file_path`; strict base64; extension allow-list; size cap) and `decode_base64`. Media allows png/jpg/jpeg/gif/webp up to 5 MB (no SVG); imports allow csv/zip up to 10 MB.
+
+5. **`models.py`**: Pydantic models/enums. Re-exported from `__init__.py` but **not used by `server.py` or `client.py`**; tools take primitive args (plus `TxAttachment` in `server.py`) and the client returns raw `dict[str, Any]`.
 
 ### Conventions for tools and resources
 
-- Tool pattern: an `@mcp.tool()` async function with typed args and a docstring (FastMCP derives the tool schema from these), defining an inner `async def _x_logic() -> str`, then `return await safe_execute_async(_x_logic)  # type: ignore[no-any-return]`. `safe_execute_async` turns exceptions into an error **string** rather than raising.
-- Resources use `listmonk://...` URIs, take path params as `str` (cast to `int` themselves), catch `ListmonkAPIError` directly, and return Markdown-formatted strings.
-- Every tool/resource returns a human-readable `str`, not JSON.
-- Adding an endpoint: add a method to `ListmonkClient`, then a tool/resource in `server.py` following the pattern above. mypy runs in `strict` mode, so everything needs full type annotations.
-- Verify request shapes against the Listmonk handlers for the target version (`knadh/listmonk`, `cmd/*.go` at the release tag), not only the docs: several endpoints read form fields or query params rather than JSON, some ignore body fields entirely, and `PUT /api/settings` / `PUT /api/settings/{key}` reload Listmonk unless a campaign is running.
-- Input validation that must happen before any request (e.g. RFC3339 dates) returns an `"Error: ValidationError - ..."` string from the tool logic rather than raising, because `ListmonkAPIError` without a `status_code` currently crashes the error mapper.
+- Tool pattern: an `@mcp.tool()` async function with typed args and a docstring (FastMCP derives the tool schema from these), defining an inner `async def _x_logic() -> str`, then `return await run_tool(_x_logic)`.
+- **Errors:** never return an error string from a tool. Raise `ValidationError` (from `exceptions.py`) for input that must be rejected before any request; let `ListmonkAPIError` propagate. `run_tool` logs and re-raises everything as `ToolError("<Type>: <message>")`, which clients see as `isError: true`; tracebacks stay in the server log.
+- **Return values:** tools that change state (non-GET, except `preview_template_body`) return `listmonk_json(<Listmonk response>)`, never a made-up "Successfully ..." message. Read tools return formatted text. List-subscriber output goes through `format_subscribers`.
+- Resources use `listmonk://...` URIs, take path params as `str` (cast to `int` themselves), catch `ListmonkAPIError` directly, and return Markdown-formatted strings (including their error text).
+- Adding an endpoint: add a method to `ListmonkClient`, then a tool/resource in `server.py` following the pattern above, and update `tests/test_registration.py` (it pins the tool count). mypy runs in `strict` mode, so everything needs full type annotations.
+- Verify request and response shapes against the Listmonk handlers for the target version (`knadh/listmonk`, `cmd/*.go` and `models/*.go` at the release tag), not only the docs. Several endpoints read form fields or query params rather than JSON, some ignore body fields entirely, `/api/about` is returned without a `data` wrapper, v6.2.0 has no media update route, and `PUT /api/settings` / `PUT /api/settings/{key}` reload Listmonk unless a campaign is running.
+- Media URLs returned by Listmonk are built from its `root_url` setting.
