@@ -44,7 +44,9 @@
   - `create_production_server()` lists 70 tools, including all 41 from #8.
 - [x] 3.8 Run ruff, mypy, build and the whole suite. Verify: `uv run ruff check src/ && uv run mypy src/ && uv build && uv run pytest` all pass.
   - ruff (src and tests) passes, mypy passes on 6 files, `uv build` produces `listmonk_mcp-0.2.0`, pytest: 21 passed.
-- [ ] 3.9 Update `CLAUDE.md`: the tool count, the `tests/` folder now existing with the command for running one test, and `json_data: Any` on `_request`. Verify: the documented `uv run pytest tests/test_templates.py::<name>` command runs.
+- [x] 3.9 Update `CLAUDE.md`: the tool count, the `tests/` folder now existing with the command for running one test, and `json_data: Any` on `_request`. Verify: the documented `uv run pytest tests/test_templates.py::<name>` command runs.
+  - `CLAUDE.md` updated (tests section, 70 tools/13 resources, `json_data: Any`/`form_data`, verifying against Listmonk handlers). The documented single-test command passes. `CLAUDE.md` is still untracked, pending a decision on whether to commit it.
+  - The 1.1 `uv.lock` NOTE is resolved: after the merges `uv lock` makes no changes, because #8 already updated the lock.
 
 ## 4. Manual checks against a disposable Listmonk
 
