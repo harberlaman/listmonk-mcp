@@ -40,8 +40,10 @@
 
 ## 5. Subscriber records and health
 
-- [ ] 5.1 Add `format_subscribers` (D8), and use it in `get_list_subscribers_tool`, `listmonk://subscribers` and `listmonk://list/{list_id}/subscribers`. Test: 3 records with lists and subscription status, paging (page 2, per_page 2, total 3), and an empty list. Verify: `uv run pytest tests/test_subscribers.py` passes.
-- [ ] 5.2 Make `check_listmonk_health` include version and build from `/api/about`, still reporting healthy with "version unavailable" when about fails (D9). Test both cases in `tests/test_admin.py`. Verify: `uv run pytest tests/test_admin.py` passes.
+- [x] 5.1 Add `format_subscribers` (D8), and use it in `get_list_subscribers_tool`, `listmonk://subscribers` and `listmonk://list/{list_id}/subscribers`. Test: 3 records with lists and subscription status, paging (page 2, per_page 2, total 3), and an empty list. Verify: `uv run pytest tests/test_subscribers.py` passes.
+  - `format_subscribers` shows one line per subscriber (`id | email | name | status`), its lists with subscription status, its attributes as JSON, and a header line "Page N, M per page, T total". It's used by `get_list_subscribers_tool` and by the `listmonk://subscribers` and `listmonk://list/{id}/subscribers` resources. 4 new tests. Suite: 84 passed.
+- [x] 5.2 Make `check_listmonk_health` include version and build from `/api/about`, still reporting healthy with "version unavailable" when about fails (D9). Test both cases in `tests/test_admin.py`. Verify: `uv run pytest tests/test_admin.py` passes.
+  - `check_listmonk_health` adds `Version:` and `Build:` from `/api/about`. If about fails, it still reports healthy and adds "Version unavailable: <Listmonk message>", logged at WARNING. 2 new tests.
 
 ## 6. Integration checks
 

@@ -53,6 +53,28 @@ def listmonk_json(result: Any) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
 
+def format_subscribers(result: dict[str, Any], heading: str, page: int = 1, per_page: int = 20) -> str:
+    """Render a Listmonk subscriber query page as records (not just a count)."""
+    data = result.get("data") or {}
+    subscribers = data.get("results") or []
+    total = data.get("total", len(subscribers))
+    page = data.get("page", page)
+    per_page = data.get("per_page", per_page)
+
+    lines = [f"# {heading}", "", f"Page {page}, {per_page} per page, {total} total", ""]
+    if not subscribers:
+        lines.append("No subscribers." if total == 0 else "No subscribers on this page.")
+    for sub in subscribers:
+        lines.append(f"- {sub.get('id')} | {sub.get('email')} | {sub.get('name')} | {sub.get('status')}")
+        lists = ", ".join(
+            f"{lst.get('name')} (ID: {lst.get('id')}, {lst.get('subscription_status', 'unknown')})"
+            for lst in sub.get("lists") or []
+        )
+        lines.append(f"  Lists: {lists or 'none'}")
+        lines.append(f"  Attributes: {json.dumps(sub.get('attribs') or {}, ensure_ascii=False)}")
+    return "\n".join(lines)
+
+
 def _require_rfc3339(before_date: str) -> None:
     if not _is_rfc3339(before_date):
         raise ValidationError(
@@ -123,8 +145,15 @@ async def check_listmonk_health() -> str:
         client = get_client()
         health_data = await client.health_check()
         config = get_config()
+        status = f"Listmonk server is healthy at {config.url}. Health data: {health_data}"
 
-        return f"Listmonk server is healthy at {config.url}. Health data: {health_data}"
+        # Health alone doesn't say which Listmonk this is; a failing /api/about must not hide health.
+        try:
+            about = await client.get_about_info()
+        except ListmonkAPIError as e:
+            logger.warning("Health check: /api/about failed: %s", e)
+            return f"{status}\nVersion unavailable: {e}"
+        return f"{status}\nVersion: {about.get('version', 'unknown')}\nBuild: {about.get('build', 'unknown')}"
 
     return await run_tool(_check_health_logic)
 
@@ -749,29 +778,7 @@ async def list_subscribers() -> str:
     try:
         client = get_client()
         result = await client.get_subscribers(per_page=50)
-
-        data = result.get("data", {})
-        subscribers = data.get("results", [])
-        total = data.get("total", 0)
-
-        subscriber_list = []
-        for sub in subscribers:
-            lists_str = ", ".join(lst.get('name', '') for lst in sub.get('lists', []))
-            subscriber_list.append(
-                f"- **{sub.get('name')}** ({sub.get('email')}) - Status: {sub.get('status')} - Lists: {lists_str}"
-            )
-
-        subscriber_items = "\n".join(subscriber_list)
-
-        return f"""# Subscribers List
-
-**Total Subscribers:** {total}
-**Showing:** {len(subscribers)} subscribers
-
-{subscriber_items}
-
-*Use the get_subscriber_by_id or get_subscriber_by_email resources for detailed information.*
-"""
+        return format_subscribers(result, "Subscribers", per_page=50)
 
     except ListmonkAPIError as e:
         return f"Error retrieving subscribers: {str(e)}"
@@ -916,11 +923,7 @@ async def get_list_subscribers_tool(
             page=page,
             per_page=per_page
         )
-
-        data = result.get("data", {})
-        subscribers = data.get("results", []) if isinstance(data, dict) else data
-        total = data.get("total", 0) if isinstance(data, dict) else len(subscribers)
-        return f"Successfully retrieved {len(subscribers)} subscribers for list {list_id} (Total: {total}, Page: {page})"
+        return format_subscribers(result, f"Subscribers of list {list_id}", page=page, per_page=per_page)
 
     return await run_tool(_get_list_subscribers_logic)
 
@@ -1462,32 +1465,7 @@ async def get_list_subscribers_resource(list_id: str) -> str:
     try:
         client = get_client()
         result = await client.get_list_subscribers(int(list_id), per_page=50)
-
-        data = result.get("data", {})
-        subscribers = data.get("results", [])
-        total = data.get("total", 0)
-
-        subscriber_list = []
-        for sub in subscribers:
-            status = sub.get('status', 'unknown')
-            created = sub.get('created_at', 'Unknown')
-
-            subscriber_list.append(
-                f"- **{sub.get('name')}** ({sub.get('email')}) - Status: {status} - Joined: {created}"
-            )
-
-        subscriber_items = "\n".join(subscriber_list) if subscriber_list else "No subscribers in this list"
-
-        return f"""# List Subscribers
-
-**List ID:** {list_id}
-**Total Subscribers:** {total}
-**Showing:** {len(subscribers)} subscribers
-
-{subscriber_items}
-
-*Use the get_subscriber_by_id or get_subscriber_by_email resources for detailed subscriber information.*
-"""
+        return format_subscribers(result, f"Subscribers of list {list_id}", per_page=50)
 
     except ListmonkAPIError as e:
         return f"Error retrieving subscribers for list {list_id}: {str(e)}"

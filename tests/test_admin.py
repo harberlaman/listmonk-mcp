@@ -8,6 +8,7 @@ from pytest_httpx import HTTPXMock
 
 from listmonk_mcp import server
 from listmonk_mcp.client import ListmonkClient
+from listmonk_mcp.config import Config
 
 from .conftest import BASE_URL
 
@@ -92,3 +93,31 @@ async def test_about_reads_unwrapped_response(
     )
 
     assert "v6.2.0" in await server.get_about_info()
+
+
+async def test_health_reports_version_and_build(
+    server_client: ListmonkClient, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch, config: Config
+) -> None:
+    monkeypatch.setattr(server, "_config", config)
+    httpx_mock.add_response(method="GET", url=f"{BASE_URL}/api/health", json={"data": True})
+    httpx_mock.add_response(method="GET", url=f"{BASE_URL}/api/about",
+                            json={"version": "v6.2.0", "build": "v6.2.0 (ef0a7587)"})
+
+    result = await server.check_listmonk_health()
+
+    assert "healthy" in result
+    assert "Version: v6.2.0" in result and "Build: v6.2.0 (ef0a7587)" in result
+
+
+async def test_health_still_healthy_when_about_fails(
+    server_client: ListmonkClient, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch, config: Config
+) -> None:
+    monkeypatch.setattr(server, "_config", config)
+    httpx_mock.add_response(method="GET", url=f"{BASE_URL}/api/health", json={"data": True})
+    httpx_mock.add_response(method="GET", url=f"{BASE_URL}/api/about", status_code=403,
+                            json={"message": "permission denied"})
+
+    result = await server.check_listmonk_health()
+
+    assert "healthy" in result
+    assert "Version unavailable: permission denied" in result
