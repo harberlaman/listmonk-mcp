@@ -1,5 +1,6 @@
 """Listmonk MCP Server using FastMCP framework."""
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -10,7 +11,13 @@ from mcp.server import FastMCP
 
 from .client import ListmonkAPIError, ListmonkClient, create_client
 from .config import Config, load_config, validate_config
-from .exceptions import APIError, ValidationError, run_tool
+from .exceptions import (
+    APIError,
+    OperationError,
+    ResourceNotFoundError,
+    ValidationError,
+    run_tool,
+)
 
 # Global state
 _client: ListmonkClient | None = None
@@ -29,6 +36,11 @@ def _is_rfc3339(value: str) -> bool:
         return datetime.fromisoformat(value).tzinfo is not None
     except ValueError:
         return False
+
+
+def listmonk_json(result: Any) -> str:
+    """Listmonk's response for a write tool, as JSON text (not a made-up success message)."""
+    return json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
 
 def _require_rfc3339(before_date: str) -> None:
@@ -139,9 +151,7 @@ async def add_subscriber(
             preconfirm_subscriptions=preconfirm
         )
 
-        subscriber_data = result.get("data", {})
-        subscriber_id = subscriber_data.get("id", "unknown")
-        return f"Successfully added subscriber: {email} (ID: {subscriber_id})"
+        return listmonk_json(result)
 
     return await run_tool(_add_subscriber_logic)
 
@@ -168,7 +178,7 @@ async def update_subscriber(
     """
     async def _update_subscriber_logic() -> str:
         client = get_client()
-        await client.update_subscriber(
+        result = await client.update_subscriber(
             subscriber_id=subscriber_id,
             email=email,
             name=name,
@@ -177,7 +187,7 @@ async def update_subscriber(
             attribs=attributes
         )
 
-        return f"Successfully updated subscriber {subscriber_id}"
+        return listmonk_json(result)
 
     return await run_tool(_update_subscriber_logic)
 
@@ -192,9 +202,9 @@ async def remove_subscriber(subscriber_id: int) -> str:
     """
     async def _remove_subscriber_logic() -> str:
         client = get_client()
-        await client.delete_subscriber(subscriber_id)
+        result = await client.delete_subscriber(subscriber_id)
 
-        return f"Successfully removed subscriber {subscriber_id}"
+        return listmonk_json(result)
 
     return await run_tool(_remove_subscriber_logic)
 
@@ -210,9 +220,9 @@ async def change_subscriber_status(subscriber_id: int, status: str) -> str:
     """
     async def _change_status_logic() -> str:
         client = get_client()
-        await client.set_subscriber_status(subscriber_id, status)
+        result = await client.set_subscriber_status(subscriber_id, status)
 
-        return f"Successfully changed subscriber {subscriber_id} status to {status}"
+        return listmonk_json(result)
 
     return await run_tool(_change_status_logic)
 
@@ -245,7 +255,7 @@ async def patch_subscriber(
         if all(v is None for v in (email, name, status, attributes, lists)):
             raise ValidationError("patch_subscriber needs at least one field to change")
         client = get_client()
-        await client.patch_subscriber(
+        result = await client.patch_subscriber(
             subscriber_id,
             email=email,
             name=name,
@@ -254,9 +264,7 @@ async def patch_subscriber(
             lists=lists,
             preconfirm_subscriptions=preconfirm,
         )
-        changed = [k for k, v in (("email", email), ("name", name), ("status", status),
-                                  ("attributes", attributes), ("lists", lists)) if v is not None]
-        return f"Successfully patched subscriber {subscriber_id} ({', '.join(changed)})"
+        return listmonk_json(result)
 
     return await run_tool(_patch_logic)
 
@@ -271,8 +279,8 @@ async def subscriber_send_optin(subscriber_id: int) -> str:
     """
     async def _optin_logic() -> str:
         client = get_client()
-        await client.subscriber_send_optin(subscriber_id)
-        return f"Successfully sent opt-in email to subscriber {subscriber_id}"
+        result = await client.subscriber_send_optin(subscriber_id)
+        return listmonk_json(result)
 
     return await run_tool(_optin_logic)
 
@@ -287,8 +295,8 @@ async def blocklist_subscriber(subscriber_id: int) -> str:
     """
     async def _blocklist_logic() -> str:
         client = get_client()
-        await client.blocklist_subscriber(subscriber_id)
-        return f"Successfully blocklisted subscriber {subscriber_id}"
+        result = await client.blocklist_subscriber(subscriber_id)
+        return listmonk_json(result)
 
     return await run_tool(_blocklist_logic)
 
@@ -303,8 +311,8 @@ async def blocklist_subscribers(subscriber_ids: list[int]) -> str:
     """
     async def _blocklist_many_logic() -> str:
         client = get_client()
-        await client.blocklist_subscribers(subscriber_ids)
-        return f"Successfully blocklisted {len(subscriber_ids)} subscriber(s)"
+        result = await client.blocklist_subscribers(subscriber_ids)
+        return listmonk_json(result)
 
     return await run_tool(_blocklist_many_logic)
 
@@ -327,11 +335,8 @@ async def manage_subscriber_lists(
     """
     async def _manage_lists_logic() -> str:
         client = get_client()
-        await client.manage_subscriber_lists(subscriber_ids, target_list_ids, action, status)
-        return (
-            f"Successfully {action}ed {len(subscriber_ids)} subscriber(s) "
-            f"on {len(target_list_ids)} list(s)"
-        )
+        result = await client.manage_subscriber_lists(subscriber_ids, target_list_ids, action, status)
+        return listmonk_json(result)
 
     return await run_tool(_manage_lists_logic)
 
@@ -379,8 +384,8 @@ async def delete_subscribers_by_query(query: str, list_ids: list[int] | None = N
     """
     async def _del_query_logic() -> str:
         client = get_client()
-        await client.delete_subscribers_by_query(query, list_ids)
-        return f"Successfully ran query-delete (query={query!r})"
+        result = await client.delete_subscribers_by_query(query, list_ids)
+        return listmonk_json(result)
 
     return await run_tool(_del_query_logic)
 
@@ -396,8 +401,8 @@ async def blocklist_subscribers_by_query(query: str, list_ids: list[int] | None 
     """
     async def _bl_query_logic() -> str:
         client = get_client()
-        await client.blocklist_subscribers_by_query(query, list_ids)
-        return f"Successfully ran query-blocklist (query={query!r})"
+        result = await client.blocklist_subscribers_by_query(query, list_ids)
+        return listmonk_json(result)
 
     return await run_tool(_bl_query_logic)
 
@@ -422,8 +427,8 @@ async def manage_subscriber_lists_by_query(
     """
     async def _ml_query_logic() -> str:
         client = get_client()
-        await client.manage_subscriber_lists_by_query(query, target_list_ids, action, list_ids, status)
-        return f"Successfully ran query-{action} on {len(target_list_ids)} list(s)"
+        result = await client.manage_subscriber_lists_by_query(query, target_list_ids, action, list_ids, status)
+        return listmonk_json(result)
 
     return await run_tool(_ml_query_logic)
 
@@ -461,8 +466,8 @@ async def delete_subscriber_bounces(subscriber_id: int) -> str:
     """
     async def _dsb_logic() -> str:
         client = get_client()
-        await client.delete_subscriber_bounces(subscriber_id)
-        return f"Successfully cleared bounce history for subscriber {subscriber_id}"
+        result = await client.delete_subscriber_bounces(subscriber_id)
+        return listmonk_json(result)
 
     return await run_tool(_dsb_logic)
 
@@ -540,8 +545,8 @@ async def delete_bounce(bounce_id: int) -> str:
     """
     async def _del_bounce_logic() -> str:
         client = get_client()
-        await client.delete_bounce(bounce_id)
-        return f"Successfully deleted bounce {bounce_id}"
+        result = await client.delete_bounce(bounce_id)
+        return listmonk_json(result)
 
     return await run_tool(_del_bounce_logic)
 
@@ -549,17 +554,15 @@ async def delete_bounce(bounce_id: int) -> str:
 @mcp.tool()
 async def delete_bounces(bounce_ids: list[int] | None = None) -> str:
     """
-    Delete bounce records. Pass an empty/None list to delete ALL bounces.
+    Delete bounce records. Giving no IDs (None or an empty list) deletes ALL bounces.
 
     Args:
-        bounce_ids: Specific IDs to delete, or None/empty to delete all.
+        bounce_ids: Specific bounce IDs to delete. Leave empty only to delete ALL bounces.
     """
     async def _del_bounces_logic() -> str:
         client = get_client()
-        await client.delete_bounces(bounce_ids)
-        if bounce_ids:
-            return f"Successfully deleted {len(bounce_ids)} bounce(s)"
-        return "Successfully deleted ALL bounces"
+        result = await client.delete_bounces(bounce_ids)
+        return listmonk_json(result)
 
     return await run_tool(_del_bounces_logic)
 
@@ -574,8 +577,8 @@ async def blocklist_bounced_subscribers() -> str:
     """
     async def _blbb_logic() -> str:
         client = get_client()
-        await client.blocklist_bounced_subscribers()
-        return "Successfully blocklisted ALL bounced subscribers"
+        result = await client.blocklist_bounced_subscribers()
+        return listmonk_json(result)
 
     return await run_tool(_blbb_logic)
 
@@ -611,8 +614,7 @@ async def import_subscribers(
             overwrite=overwrite,
             subscription_status=subscription_status,
         )
-        d = result.get("data", {})
-        return f"Import started (status={d.get('status', '?')}, total={d.get('total', '?')})"
+        return listmonk_json(result)
 
     return await run_tool(_import_logic)
 
@@ -649,8 +651,8 @@ async def stop_import() -> str:
     """Stop the currently running subscriber import."""
     async def _stop_logic() -> str:
         client = get_client()
-        await client.stop_import()
-        return "Successfully stopped the running import"
+        result = await client.stop_import()
+        return listmonk_json(result)
 
     return await run_tool(_stop_logic)
 
@@ -814,9 +816,7 @@ async def create_mailing_list(
             description=description
         )
 
-        list_data = result.get("data", {})
-        list_id = list_data.get("id", "unknown")
-        return f"Successfully created mailing list '{name}' (ID: {list_id})"
+        return listmonk_json(result)
 
     return await run_tool(_create_list_logic)
 
@@ -843,7 +843,7 @@ async def update_mailing_list(
     """
     async def _update_list_logic() -> str:
         client = get_client()
-        await client.update_list(
+        result = await client.update_list(
             list_id=list_id,
             name=name,
             type=type,
@@ -852,7 +852,7 @@ async def update_mailing_list(
             description=description
         )
 
-        return f"Successfully updated mailing list {list_id}"
+        return listmonk_json(result)
 
     return await run_tool(_update_list_logic)
 
@@ -867,9 +867,9 @@ async def delete_mailing_list(list_id: int) -> str:
     """
     async def _delete_list_logic() -> str:
         client = get_client()
-        await client.delete_list(list_id)
+        result = await client.delete_list(list_id)
 
-        return f"Successfully deleted mailing list {list_id}"
+        return listmonk_json(result)
 
     return await run_tool(_delete_list_logic)
 
@@ -1011,9 +1011,7 @@ async def create_campaign(
             tags=tags or []
         )
 
-        campaign_data = result.get("data", {})
-        campaign_id = campaign_data.get("id", "unknown")
-        return f"Successfully created campaign '{name}' (ID: {campaign_id})"
+        return listmonk_json(result)
 
     return await run_tool(_create_campaign_logic)
 
@@ -1040,7 +1038,7 @@ async def update_campaign(
     """
     async def _update_campaign_logic() -> str:
         client = get_client()
-        await client.update_campaign(
+        result = await client.update_campaign(
             campaign_id=campaign_id,
             name=name,
             subject=subject,
@@ -1049,7 +1047,7 @@ async def update_campaign(
             tags=tags
         )
 
-        return f"Successfully updated campaign {campaign_id}"
+        return listmonk_json(result)
 
     return await run_tool(_update_campaign_logic)
 
@@ -1064,9 +1062,9 @@ async def send_campaign(campaign_id: int) -> str:
     """
     async def _send_campaign_logic() -> str:
         client = get_client()
-        await client.send_campaign(campaign_id)
+        result = await client.send_campaign(campaign_id)
 
-        return f"Successfully sent campaign {campaign_id}"
+        return listmonk_json(result)
 
     return await run_tool(_send_campaign_logic)
 
@@ -1082,9 +1080,9 @@ async def schedule_campaign(campaign_id: int, send_at: str) -> str:
     """
     async def _schedule_campaign_logic() -> str:
         client = get_client()
-        await client.schedule_campaign(campaign_id, send_at)
+        result = await client.schedule_campaign(campaign_id, send_at)
 
-        return f"Successfully scheduled campaign {campaign_id} for {send_at}"
+        return listmonk_json(result)
 
     return await run_tool(_schedule_campaign_logic)
 
@@ -1103,9 +1101,8 @@ async def test_campaign(campaign_id: int, subscribers: list[str]) -> str:
     """
     async def _test_campaign_logic() -> str:
         client = get_client()
-        await client.test_campaign(campaign_id, subscribers)
-        recipients = ", ".join(subscribers)
-        return f"Successfully queued test send of campaign {campaign_id} to: {recipients}"
+        result = await client.test_campaign(campaign_id, subscribers)
+        return listmonk_json(result)
 
     return await run_tool(_test_campaign_logic)
 
@@ -1121,8 +1118,8 @@ async def change_campaign_status(campaign_id: int, status: str) -> str:
     """
     async def _change_status_logic() -> str:
         client = get_client()
-        await client.change_campaign_status(campaign_id, status)
-        return f"Successfully changed campaign {campaign_id} status to '{status}'"
+        result = await client.change_campaign_status(campaign_id, status)
+        return listmonk_json(result)
 
     return await run_tool(_change_status_logic)
 
@@ -1147,15 +1144,14 @@ async def archive_campaign(
     """
     async def _archive_logic() -> str:
         client = get_client()
-        await client.archive_campaign(
+        result = await client.archive_campaign(
             campaign_id,
             archive=archive,
             archive_template_id=archive_template_id,
             archive_meta=archive_meta,
             archive_slug=archive_slug,
         )
-        verb = "archived" if archive else "unarchived"
-        return f"Successfully {verb} campaign {campaign_id}"
+        return listmonk_json(result)
 
     return await run_tool(_archive_logic)
 
@@ -1170,8 +1166,8 @@ async def delete_campaign(campaign_id: int) -> str:
     """
     async def _delete_campaign_logic() -> str:
         client = get_client()
-        await client.delete_campaign(campaign_id)
-        return f"Successfully deleted campaign {campaign_id}"
+        result = await client.delete_campaign(campaign_id)
+        return listmonk_json(result)
 
     return await run_tool(_delete_campaign_logic)
 
@@ -1186,8 +1182,8 @@ async def delete_campaigns(campaign_ids: list[int]) -> str:
     """
     async def _delete_campaigns_logic() -> str:
         client = get_client()
-        await client.delete_campaigns(campaign_ids)
-        return f"Successfully deleted {len(campaign_ids)} campaign(s): {campaign_ids}"
+        result = await client.delete_campaigns(campaign_ids)
+        return listmonk_json(result)
 
     return await run_tool(_delete_campaigns_logic)
 
@@ -1558,9 +1554,7 @@ async def create_template(
             is_default=is_default
         )
 
-        template_data = result.get("data", {})
-        template_id = template_data.get("id", "unknown")
-        return f"Successfully created template '{name}' (ID: {template_id})"
+        return listmonk_json(result)
 
     return await run_tool(_create_template_logic)
 
@@ -1585,7 +1579,7 @@ async def update_template(
     """
     async def _update_template_logic() -> str:
         client = get_client()
-        await client.update_template(
+        result = await client.update_template(
             template_id=template_id,
             name=name,
             body=body,
@@ -1593,7 +1587,7 @@ async def update_template(
             subject=subject
         )
 
-        return f"Successfully updated template {template_id}"
+        return listmonk_json(result)
 
     return await run_tool(_update_template_logic)
 
@@ -1608,9 +1602,9 @@ async def delete_template(template_id: int) -> str:
     """
     async def _delete_template_logic() -> str:
         client = get_client()
-        await client.delete_template(template_id)
+        result = await client.delete_template(template_id)
 
-        return f"Successfully deleted template {template_id}"
+        return listmonk_json(result)
 
     return await run_tool(_delete_template_logic)
 
@@ -1625,8 +1619,8 @@ async def set_default_template(template_id: int) -> str:
     """
     async def _set_default_logic() -> str:
         client = get_client()
-        await client.set_default_template(template_id)
-        return f"Successfully set template {template_id} as default"
+        result = await client.set_default_template(template_id)
+        return listmonk_json(result)
 
     return await run_tool(_set_default_logic)
 
@@ -1682,8 +1676,8 @@ async def update_settings(settings: dict[str, Any]) -> str:
     """
     async def _update_settings_logic() -> str:
         client = get_client()
-        await client.update_settings(settings)
-        return "Successfully updated settings"
+        result = await client.update_settings(settings)
+        return listmonk_json(result)
 
     return await run_tool(_update_settings_logic)
 
@@ -1701,8 +1695,8 @@ async def update_setting(key: str, value: Any) -> str:
     """
     async def _update_one_logic() -> str:
         client = get_client()
-        await client.update_setting(key, value)
-        return f"Successfully updated setting '{key}'"
+        result = await client.update_setting(key, value)
+        return listmonk_json(result)
 
     return await run_tool(_update_one_logic)
 
@@ -1717,8 +1711,8 @@ async def test_smtp_settings(settings: dict[str, Any]) -> str:
     """
     async def _test_smtp_logic() -> str:
         client = get_client()
-        await client.test_smtp_settings(settings)
-        return "SMTP test send dispatched successfully"
+        result = await client.test_smtp_settings(settings)
+        return listmonk_json(result)
 
     return await run_tool(_test_smtp_logic)
 
@@ -1728,8 +1722,8 @@ async def reload_app() -> str:
     """Trigger a hot-reload of the Listmonk app (re-reads settings)."""
     async def _reload_logic() -> str:
         client = get_client()
-        await client.reload_app()
-        return "Successfully triggered app reload"
+        result = await client.reload_app()
+        return listmonk_json(result)
 
     return await run_tool(_reload_logic)
 
@@ -1792,8 +1786,7 @@ async def gc_subscribers(gc_type: str) -> str:
     async def _gc_subs_logic() -> str:
         client = get_client()
         result = await client.gc_subscribers(gc_type)
-        count = result.get("data", {}).get("count", "unknown")
-        return f"Successfully ran subscriber GC ({gc_type}): {count} deleted"
+        return listmonk_json(result)
 
     return await run_tool(_gc_subs_logic)
 
@@ -1810,8 +1803,8 @@ async def gc_campaign_analytics(analytics_type: str, before_date: str) -> str:
     async def _gc_analytics_logic() -> str:
         _require_rfc3339(before_date)
         client = get_client()
-        await client.gc_campaign_analytics(analytics_type, before_date)
-        return f"Successfully ran analytics GC ({analytics_type}) before {before_date}"
+        result = await client.gc_campaign_analytics(analytics_type, before_date)
+        return listmonk_json(result)
 
     return await run_tool(_gc_analytics_logic)
 
@@ -1828,8 +1821,7 @@ async def gc_unconfirmed_subscriptions(before_date: str) -> str:
         _require_rfc3339(before_date)
         client = get_client()
         result = await client.gc_unconfirmed_subscriptions(before_date)
-        count = result.get("data", {}).get("count", "unknown")
-        return f"Successfully GC'd unconfirmed subscriptions before {before_date}: {count} deleted"
+        return listmonk_json(result)
 
     return await run_tool(_gc_unconfirmed_logic)
 
@@ -1852,14 +1844,14 @@ async def send_transactional_email(
     """
     async def _send_transactional_logic() -> str:
         client = get_client()
-        await client.send_transactional_email(
+        result = await client.send_transactional_email(
             template_id=template_id,
             subscriber_email=subscriber_email,
             data=data or {},
             content_type=content_type
         )
 
-        return f"Successfully sent transactional email to {subscriber_email}"
+        return listmonk_json(result)
 
     return await run_tool(_send_transactional_logic)
 
@@ -2035,12 +2027,8 @@ async def upload_media_file(
         client = get_client()
         result = await client.upload_media(file_path, title)
 
-        media_data = result.get("data", {})
-        media_id = media_data.get("id", "unknown")
-        url = media_data.get("url", "No URL")
-        filename = media_data.get("filename", "unknown")
 
-        return f"Successfully uploaded '{filename}' (ID: {media_id})\nURL: {url}"
+        return listmonk_json(result)
 
     return await run_tool(_upload_media_logic)
 
@@ -2059,9 +2047,9 @@ async def rename_media(media_id: int, new_title: str) -> str:
     """
     async def _rename_media_logic() -> str:
         client = get_client()
-        await client.update_media(media_id, new_title)
+        result = await client.update_media(media_id, new_title)
 
-        return f"Successfully renamed media {media_id} to '{new_title}'"
+        return listmonk_json(result)
 
     return await run_tool(_rename_media_logic)
 
@@ -2079,9 +2067,9 @@ async def delete_media_file(media_id: int) -> str:
     """
     async def _delete_media_logic() -> str:
         client = get_client()
-        await client.delete_media(media_id)
+        result = await client.delete_media(media_id)
 
-        return f"Successfully deleted media {media_id}"
+        return listmonk_json(result)
 
     return await run_tool(_delete_media_logic)
 
@@ -2175,7 +2163,7 @@ async def replace_in_campaign_body(
         campaign = result.get("data", {})
 
         if not campaign:
-            return f"Campaign {campaign_id} not found"
+            raise ResourceNotFoundError("Campaign", campaign_id)
 
         current_body = campaign.get("body", "")
 
@@ -2184,10 +2172,14 @@ async def replace_in_campaign_body(
         count = current_body.count(search)
 
         if count == 0:
-            return f"Search text not found in campaign {campaign_id}"
+            raise OperationError(
+                f"Search text not found in campaign {campaign_id}; nothing was changed",
+                operation="replace",
+                resource_id=campaign_id,
+            )
 
         # Update campaign with new body
-        await client.update_campaign(
+        updated = await client.update_campaign(
             campaign_id=campaign_id,
             name=campaign.get("name"),
             subject=campaign.get("subject"),
@@ -2195,7 +2187,7 @@ async def replace_in_campaign_body(
             body=new_body
         )
 
-        return f"Successfully replaced {count} occurrence(s) in campaign {campaign_id}"
+        return listmonk_json(updated)
 
     return await run_tool(_replace_logic)
 
@@ -2236,7 +2228,7 @@ async def regex_replace_in_campaign_body(
         campaign = result.get("data", {})
 
         if not campaign:
-            return f"Campaign {campaign_id} not found"
+            raise ResourceNotFoundError("Campaign", campaign_id)
 
         current_body = campaign.get("body", "")
 
@@ -2244,10 +2236,14 @@ async def regex_replace_in_campaign_body(
         new_body, count = re.subn(pattern, replace, current_body)
 
         if count == 0:
-            return f"Pattern not found in campaign {campaign_id}"
+            raise OperationError(
+                f"Pattern not found in campaign {campaign_id}; nothing was changed",
+                operation="replace",
+                resource_id=campaign_id,
+            )
 
         # Update campaign with new body
-        await client.update_campaign(
+        updated = await client.update_campaign(
             campaign_id=campaign_id,
             name=campaign.get("name"),
             subject=campaign.get("subject"),
@@ -2255,7 +2251,7 @@ async def regex_replace_in_campaign_body(
             body=new_body
         )
 
-        return f"Successfully replaced {count} match(es) in campaign {campaign_id}"
+        return listmonk_json(updated)
 
     return await run_tool(_regex_replace_logic)
 
@@ -2294,7 +2290,7 @@ async def batch_replace_in_campaign_body(
         campaign = result.get("data", {})
 
         if not campaign:
-            return f"Campaign {campaign_id} not found"
+            raise ResourceNotFoundError("Campaign", campaign_id)
 
         current_body = campaign.get("body", "")
         new_body = current_body
@@ -2313,10 +2309,14 @@ async def batch_replace_in_campaign_body(
             total_count += count
 
         if total_count == 0:
-            return f"No search texts found in campaign {campaign_id}"
+            raise OperationError(
+                f"Search text not found in campaign {campaign_id}; nothing was changed",
+                operation="replace",
+                resource_id=campaign_id,
+            )
 
         # Update campaign with new body
-        await client.update_campaign(
+        updated = await client.update_campaign(
             campaign_id=campaign_id,
             name=campaign.get("name"),
             subject=campaign.get("subject"),
@@ -2324,7 +2324,7 @@ async def batch_replace_in_campaign_body(
             body=new_body
         )
 
-        return f"Successfully completed {len(replacements)} replacement operation(s) with {total_count} total change(s) in campaign {campaign_id}"
+        return listmonk_json(updated)
 
     return await run_tool(_batch_replace_logic)
 

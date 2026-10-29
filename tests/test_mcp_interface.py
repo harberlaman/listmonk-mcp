@@ -1,5 +1,6 @@
 """mcp-interface: what a real MCP client sees, using an in-memory session against the server object."""
 
+import json
 import os
 import subprocess
 import sys
@@ -121,3 +122,34 @@ def test_import_without_config_connects_to_nothing() -> None:
 
     assert done.returncode == 0, done.stderr
     assert "Connecting to Listmonk" not in done.stderr
+
+
+async def test_write_tool_returns_listmonk_json(listmonk_env: None, httpx_mock: HTTPXMock) -> None:
+    created = {"data": {"id": 7, "name": "Training", "type": "private", "optin": "single"}}
+    httpx_mock.add_response(method="POST", url=f"{BASE_URL}/api/lists", json=created)
+
+    async with connect() as session:
+        result = await session.call_tool("create_mailing_list", {"name": "Training"})
+
+    assert result.isError is False
+    assert json.loads(text(result)) == created
+
+
+async def test_read_tool_returns_formatted_text(listmonk_env: None, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE_URL}/api/templates",
+        json={"data": [{"id": 5, "name": "TT-Tx-Shell", "type": "tx", "is_default": False}]},
+    )
+
+    async with connect() as session:
+        result = await session.call_tool("get_templates", {})
+
+    assert result.isError is False
+    assert "TT-Tx-Shell" in text(result)
+    try:
+        json.loads(text(result))
+    except json.JSONDecodeError:
+        pass
+    else:
+        raise AssertionError("read tool returned raw JSON")

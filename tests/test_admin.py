@@ -23,10 +23,10 @@ async def test_gc_campaign_analytics_sends_before_date(
 
     result = await server.gc_campaign_analytics("views", "2026-01-01T00:00:00Z")
 
-    assert result.startswith("Successfully")
+    assert json.loads(result) == {"data": True}
 
 
-async def test_gc_unconfirmed_sends_before_date_and_reports_count(
+async def test_gc_unconfirmed_sends_before_date_and_returns_response(
     server_client: ListmonkClient, httpx_mock: HTTPXMock
 ) -> None:
     httpx_mock.add_response(
@@ -37,7 +37,7 @@ async def test_gc_unconfirmed_sends_before_date_and_reports_count(
 
     result = await server.gc_unconfirmed_subscriptions("2026-01-01T00:00:00+00:00")
 
-    assert "7 deleted" in result
+    assert json.loads(result) == {"data": {"count": 7}}
 
 
 async def test_gc_rejects_non_rfc3339_before_any_request(
@@ -52,7 +52,7 @@ async def test_gc_rejects_non_rfc3339_before_any_request(
     assert httpx_mock.get_requests() == []
 
 
-async def test_gc_subscribers_reports_count(
+async def test_gc_subscribers_returns_response(
     server_client: ListmonkClient, httpx_mock: HTTPXMock
 ) -> None:
     httpx_mock.add_response(
@@ -61,7 +61,7 @@ async def test_gc_subscribers_reports_count(
         json={"data": {"count": 3}},
     )
 
-    assert "3 deleted" in await server.gc_subscribers("orphan")
+    assert json.loads(await server.gc_subscribers("orphan")) == {"data": {"count": 3}}
 
 
 def test_update_setting_docs_warn_about_reload() -> None:

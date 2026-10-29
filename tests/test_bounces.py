@@ -1,5 +1,7 @@
 """bounce-management: deleting bounces, and blocklisting bounced subscribers (always all)."""
 
+import json
+
 from pytest_httpx import HTTPXMock
 
 from listmonk_mcp import server
@@ -18,7 +20,7 @@ async def test_blocklist_bounced_sends_no_body(
     request = httpx_mock.get_request(method="PUT", url=f"{BASE_URL}/api/bounces/blocklist")
     assert request is not None
     assert request.content == b""
-    assert "ALL" in result
+    assert json.loads(result) == {"data": True}
 
 
 def test_blocklist_bounced_has_no_params_and_warns() -> None:
@@ -45,4 +47,10 @@ async def test_delete_bounces_without_ids_deletes_all(
 
     result = await server.delete_bounces([])
 
-    assert result == "Successfully deleted ALL bounces"
+    assert json.loads(result) == {"data": True}
+
+
+def test_delete_bounces_description_warns_about_all() -> None:
+    tool = server.mcp._tool_manager.get_tool("delete_bounces")
+    assert tool is not None
+    assert "no IDs" in tool.description and "ALL bounces" in tool.description

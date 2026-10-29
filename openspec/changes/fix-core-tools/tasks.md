@@ -15,8 +15,10 @@
 
 ## 2. Write tools return Listmonk's JSON (mcp-interface)
 
-- [ ] 2.1 Add `listmonk_json()` and make every write tool (the 48 non-GET tools, excluding `preview_template_body`) return Listmonk's response (D3). Add the "no IDs deletes ALL bounces" warning to the `delete_bounces` description. Verify: `grep -n 'Successfully' src/listmonk_mcp/server.py` finds nothing.
-- [ ] 2.2 Update the tests that assert "Successfully …" text (`test_admin`, `test_bounces`, `test_subscribers`) to assert the JSON result. Add `create_mailing_list` (returns the JSON with the new `id`) and `get_templates` (still formatted text) to `tests/test_mcp_interface.py`. Verify: `uv run pytest` passes.
+- [x] 2.1 Add `listmonk_json()` and make every write tool (the 48 non-GET tools, excluding `preview_template_body`) return Listmonk's response (D3). Add the "no IDs deletes ALL bounces" warning to the `delete_bounces` description. Verify: `grep -n 'Successfully' src/listmonk_mcp/server.py` finds nothing.
+  - 48 write tools now return `listmonk_json(<response>)`. 44 were converted mechanically; `delete_bounces` and the three `*_replace_in_campaign_body` tools by hand. In the replace tools, "campaign not found" and "text not found" (nothing written) now raise `ResourceNotFoundError`/`OperationError` rather than returning text. The only `Successfully` left in `server.py` is the read tool `get_list_subscribers_tool`, which task 5.1 replaces.
+- [x] 2.2 Update the tests that assert "Successfully …" text (`test_admin`, `test_bounces`, `test_subscribers`) to assert the JSON result. Add `create_mailing_list` (returns the JSON with the new `id`) and `get_templates` (still formatted text) to `tests/test_mcp_interface.py`. Verify: `uv run pytest` passes.
+  - GC and bounce tests assert the JSON. Added `create_mailing_list` (JSON with `id`), `get_templates` (formatted text, not JSON) and a `delete_bounces` description check. 38 passed.
 
 ## 3. HTTP client and uploads (media-management, subscriber-import)
 
