@@ -67,6 +67,7 @@ Run `docker compose -f docs/listmonk-docker-compose.yml up -d` on a dev machine,
   - *Alternative:* a separate one-off HTTP call, as #8's import does. Rejected because it would skip `_request`'s retry and error handling.
 - **N6:** `patch_subscriber(subscriber_id, email?, name?, status?, attributes?, lists?, preconfirm=False)` sends only the given fields. Calling it with nothing to change is an error, raised before any request is sent. This is a **breaking** change to #8's signature (`action` and `target_list_ids` are removed). That's acceptable because nothing has deployed #8 yet, and bulk list actions stay available through `manage_subscriber_lists`.
 - **N7:** `blocklist_bounced_subscribers()` takes no arguments and sends no body. Its description says it blocklists ALL bounced subscribers.
+- **N10, N11 (found in the D4 live run):** `get_about_info` reads the response as-is, because `/api/about` is the only endpoint Listmonk returns without a `data` wrapper. `get_subscriber_activity` renders `data.campaign_views` and `data.link_clicks` (Listmonk's real shape) instead of treating `data` as a list of events, which crashed.
 - **N8 (documentation only):** the `update_setting` and `update_settings` descriptions say that Listmonk reloads afterwards unless a campaign is running. Gating those tools is left to the guardrails change.
 
 ### D5. Push `master`, never push tags in this change

@@ -54,8 +54,12 @@ The `delete_subscribers_by_query`, `blocklist_subscribers_by_query` and `manage_
 - **THEN** the tool returns an error message containing Listmonk's error, and no subscriber is changed
 
 ### Requirement: Subscriber activity history
-The `get_subscriber_activity` tool SHALL return a subscriber's activity as Listmonk records it from `GET /api/subscribers/{id}/activity`.
+The `get_subscriber_activity` tool SHALL return a subscriber's campaign views (campaign, view count, last viewed) and link clicks (URL, campaign, click count, last clicked) from `GET /api/subscribers/{id}/activity`.
 
 #### Scenario: Read activity
-- **WHEN** `get_subscriber_activity` is called with an existing subscriber ID
-- **THEN** the tool returns that subscriber's activity records
+- **WHEN** `get_subscriber_activity` is called for a subscriber who viewed one campaign and clicked one link
+- **THEN** the tool lists that campaign with its view count and that link with its click count
+
+#### Scenario: No activity
+- **WHEN** the subscriber has no views or clicks
+- **THEN** the tool says no activity is recorded

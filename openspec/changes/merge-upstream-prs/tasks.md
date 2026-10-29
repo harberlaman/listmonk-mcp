@@ -50,14 +50,34 @@
 
 ## 4. Manual checks against a disposable Listmonk
 
-- [ ] 4.1 Start a local Listmonk (`docker compose -f docs/listmonk-docker-compose.yml up -d`), create an API user and token, and point a local `.env` at `http://localhost:9000`. Verify: `curl -H "Authorization: token <user>:<token>" http://localhost:9000/api/health` returns `{"data":true}`. If Docker isn't available, mark section 4 as not run and say so. Do not use production.
-- [ ] 4.2 Run the main scenario of each spec in `specs/` through the MCP server (`uv run listmonk-mcp`, with an MCP client or the inspector) against the local instance. Verify: each scenario's result is recorded as pass, or fail with a `NOTE:`.
-- [ ] 4.3 Run only the read-only tools (`get_about_info`, `get_settings`, `get_logs`, `get_dashboard_counts`) against production. Verify: `get_about_info` returns the version and build, and the `get_settings` SMTP password is masked by Listmonk.
+- [x] 4.1 Start a local Listmonk (`docker compose -f docs/listmonk-docker-compose.yml up -d`), create an API user and token, and point a local `.env` at `http://localhost:9000`. Verify: `curl -H "Authorization: token <user>:<token>" http://localhost:9000/api/health` returns `{"data":true}`. If Docker isn't available, mark section 4 as not run and say so. Do not use production.
+  - Ran on the local Docker engine (`--context default`). The production Docker host wasn't touched. Stack `lm-mcp-test` in `/tmp/lm-test-stack-xmdE`: `listmonk/listmonk:v6.2.0`, `postgres:17-alpine`, `127.0.0.1:9100` only, random admin password, API user `mcp-test` (Super Admin role). `/api/health` returned `{"data":true}` and `/api/about` returned `v6.2.0 (ef0a7587 …)`.
+- [x] 4.2 Run the main scenario of each spec in `specs/` through the MCP server (`uv run listmonk-mcp`, with an MCP client or the inspector) against the local instance. Verify: each scenario's result is recorded as pass, or fail with a `NOTE:`.
+  - Driver script `/tmp/lm-test-stack-xmdE/drive.py` (outside the repo) runs `uv run listmonk-mcp` over stdio with an MCP `ClientSession` and checks every scenario by reading Listmonk's REST API back. 37 of 40 passed on the first run, and 70 tools are listed over stdio.
+  - NOTE N10 (fixed): `get_about_info` returned `About: {}`. `/api/about` is the only endpoint Listmonk returns without a `data` wrapper.
+  - NOTE N11 (fixed): `get_subscriber_activity` crashed (`'str' object has no attribute 'get'`). Listmonk returns `{campaign_views:[…], link_clicks:[…]}`, not a list of events. The spec now describes views and clicks.
+  - Known, not fixed here: `import_subscribers` with a missing file fails with the `'<=' not supported … 'NoneType'` TypeError (N9). The driver had wrongly counted it as a pass.
+  - Expected on the test instance: `subscriber_send_optin` returns "Error sending opt-in e-mail" because the test Listmonk has no SMTP. Bounce scenarios ran with no bounce records, because v6.2.0 has no API to create them.
+  - After the N10 and N11 fixes, a second stdio check shows `get_about_info` reporting v6.2.0 and `get_subscriber_activity` reporting "No activity recorded". pytest: 24 passed.
+- [x] 4.3 Run only the read-only tools (`get_about_info`, `get_settings`, `get_logs`, `get_dashboard_counts`) against production. Verify: `get_about_info` returns the version and build, and the `get_settings` SMTP password is masked by Listmonk.
+  - Credentials were read from the deployed MCP server container's settings into a temp file readable only by this user (never printed) and deleted afterwards. Calls went through the public proxy hostname, because the container's URL is only reachable inside the Docker network. Results: `get_about_info` shows the version and build; `get_settings` contains the SMTP block with all 4 password fields masked by Listmonk; `get_logs` returns log lines, including an `error sending message` entry; `get_dashboard_counts` returns counts. No write tools were called. Contents weren't recorded here.
 
 ## 5. Publish to the fork
 
 - [ ] 5.1 Push `master` to `origin` (`harberlaman/listmonk-mcp`) with no tags. Verify: `git status -sb` shows `master` level with `origin/master`, and `git ls-remote --tags origin` lists no new `v*` tag.
-- [ ] 5.2 Collect every `NOTE:` that wasn't fixed (including `import_subscribers` repeating P3) into a short list at the end of this file, as input for the fix and guardrails changes. Verify: the list exists.
+- [x] 5.2 Collect every `NOTE:` that wasn't fixed (including `import_subscribers` repeating P3) into a short list at the end of this file, as input for the fix and guardrails changes. Verify: the list exists.
+  - Done: see "Carried forward" below.
+
+## Carried forward
+
+Not fixed in this change. Input for the next changes:
+
+- **Fix change:** N9, `import_subscribers` takes a path on the server, and a missing file crashes through the `status_code=None` error mapper (the same root cause as P3 `upload_media_file`). Fix the mapper once for both, and accept uploaded content rather than server paths.
+- **Fix change:** #8's write tools return made-up "Successfully …" strings rather than Listmonk's response (for example, `test_campaign` says "queued" even when the recipient isn't a subscriber and nothing is sent).
+- **Fix change:** resources are still not copied to the production server, and errors are returned as plain text rather than flagged as MCP errors.
+- **Guardrails change:** N8, `update_setting` and `update_settings` reload Listmonk unless a campaign is running, so treat both like `reload_app` and don't allow them by default.
+- **Guardrails change:** `blocklist_bounced_subscribers` (always ALL), `delete_bounces([])` (ALL), `delete_subscribers_by_query`, `blocklist_subscribers_by_query`, `delete_campaigns`, `gc_*` and `reload_app` are registered with no gate.
+- **Guardrails change:** `get_settings` relies on Listmonk's bullet masking only.
 
 ## Workflow follow-up
 
