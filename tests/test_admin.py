@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 from pytest_httpx import HTTPXMock
 
 from listmonk_mcp import server
@@ -42,8 +44,10 @@ async def test_gc_rejects_non_rfc3339_before_any_request(
     server_client: ListmonkClient, httpx_mock: HTTPXMock
 ) -> None:
     for bad in ("2026-01-01", "2026-01-01T00:00:00", "yesterday"):
-        assert (await server.gc_campaign_analytics("all", bad)).startswith("Error: ValidationError")
-        assert (await server.gc_unconfirmed_subscriptions(bad)).startswith("Error: ValidationError")
+        with pytest.raises(ToolError, match="^ValidationError: before_date"):
+            await server.gc_campaign_analytics("all", bad)
+        with pytest.raises(ToolError, match="^ValidationError: before_date"):
+            await server.gc_unconfirmed_subscriptions(bad)
 
     assert httpx_mock.get_requests() == []
 

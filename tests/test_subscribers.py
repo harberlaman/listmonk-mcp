@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 from pytest_httpx import HTTPXMock
 
 from listmonk_mcp import server
@@ -37,9 +39,9 @@ async def test_patch_lists_replaces_subscriptions(
 async def test_patch_with_nothing_to_change_sends_nothing(
     server_client: ListmonkClient, httpx_mock: HTTPXMock
 ) -> None:
-    result = await server.patch_subscriber(3)
+    with pytest.raises(ToolError, match="^ValidationError: patch_subscriber needs at least one field"):
+        await server.patch_subscriber(3)
 
-    assert result.startswith("Error: ValidationError")
     assert httpx_mock.get_requests() == []
 
 

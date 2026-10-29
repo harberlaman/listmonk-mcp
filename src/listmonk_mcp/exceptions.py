@@ -1,8 +1,11 @@
 """Exception classes for the Listmonk MCP server."""
 
+import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
+from mcp.server.fastmcp.exceptions import ToolError
 
 # Import ListmonkAPIError from client module
 from .client import ListmonkAPIError
@@ -163,9 +166,10 @@ class ResourceNotFoundError(OperationError):
         self,
         resource_type: str,
         resource_id: str | int,
-        details: dict[str, Any] | None = None
+        details: dict[str, Any] | None = None,
+        message: str | None = None
     ):
-        message = f"{resource_type} with ID '{resource_id}' not found"
+        message = message or f"{resource_type} with ID '{resource_id}' not found"
         super().__init__(message, "get", resource_id, details)
         self.resource_type = resource_type
 
@@ -183,9 +187,10 @@ class DuplicateResourceError(OperationError):
         self,
         resource_type: str,
         identifier: str,
-        details: dict[str, Any] | None = None
+        details: dict[str, Any] | None = None,
+        message: str | None = None
     ):
-        message = f"{resource_type} with identifier '{identifier}' already exists"
+        message = message or f"{resource_type} with identifier '{identifier}' already exists"
         super().__init__(message, "create", identifier, details)
         self.resource_type = resource_type
         self.identifier = identifier
@@ -201,14 +206,23 @@ class DuplicateResourceError(OperationError):
 # HTTP Status Code Mapping Utilities
 
 def map_http_status_to_exception(
-    status_code: int,
+    status_code: int | None,
     message: str,
     response_data: dict[str, Any] | None = None,
     endpoint: str | None = None
 ) -> ListmonkMCPError:
-    """Map HTTP status codes to appropriate exception types."""
+    """Map HTTP status codes to appropriate exception types.
 
-    if status_code == 401:
+    ``status_code`` is None for errors raised before or without an HTTP response
+    (a local file not found, a network failure after retries). Listmonk's own
+    ``message`` is kept in every branch.
+    """
+
+    if status_code is None:
+        if "not found" in message.lower():
+            return OperationError(message=message, operation="request", details=response_data)
+        return APIError(message=message, response_data=response_data, endpoint=endpoint)
+    elif status_code == 401:
         return AuthenticationError(
             message=message or "Unauthorized access",
             status_code=status_code,
@@ -236,13 +250,15 @@ def map_http_status_to_exception(
         return ResourceNotFoundError(
             resource_type=resource_type,
             resource_id="unknown",
-            details=response_data
+            details=response_data,
+            message=message or None
         )
     elif status_code == 409:
         return DuplicateResourceError(
             resource_type="Resource",
             identifier="unknown",
-            details=response_data
+            details=response_data,
+            message=message or None
         )
     elif status_code == 422:
         return ValidationError(
@@ -317,47 +333,30 @@ def convert_listmonk_api_error(error: Exception) -> ListmonkMCPError:
     )
 
 
-# MCP Error Response Formatting
+# MCP tool runner
 
-def format_mcp_error(error: ListmonkMCPError) -> dict[str, Any]:
-    """Format an exception for MCP error response."""
-    return {
-        "error": error.to_dict(),
-        "success": False
-    }
+logger = logging.getLogger(__name__)
 
 
-def safe_execute(func: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+async def run_tool(logic: Callable[[], Awaitable[str]]) -> str:
+    """Run a tool's logic and turn every failure into an MCP tool error.
+
+    FastMCP reports a raised ToolError to the client as ``isError: true``.
+    Tracebacks for unexpected errors go to the server log only.
     """
-    Safely execute a function and return formatted response.
-
-    This is a utility function that can be used to wrap MCP tool functions
-    to ensure consistent error handling and response formatting.
-    """
+    tool = logic.__qualname__.split(".<locals>")[0]
     try:
-        result = func(*args, **kwargs)
-        if hasattr(result, '__await__'):  # Handle async functions
-            raise ValueError("Use safe_execute_async for async functions")
-        return {"success": True, "data": result}
+        return await logic()
     except ListmonkMCPError as e:
-        return format_mcp_error(e)
-    except Exception as e:
-        mcp_error = convert_listmonk_api_error(e)
-        return format_mcp_error(mcp_error)
-
-
-async def safe_execute_async(func: Any, *args: Any, **kwargs: Any) -> Any:
-    """
-    Safely execute an async function and handle ListmonkAPIError exceptions.
-    Returns formatted error response for MCP tools.
-    """
-    try:
-        result = await func(*args, **kwargs)
-        return result
+        logger.warning("Tool %s failed: %s: %s", tool, type(e).__name__, e.message)
+        raise ToolError(f"{type(e).__name__}: {e.message}") from e
     except ListmonkAPIError as e:
-        error_details = convert_listmonk_api_error(e).to_dict()
-        return f"Error: {error_details['error_type']} - {error_details['message']}"
+        mapped = convert_listmonk_api_error(e)
+        logger.warning(
+            "Tool %s failed: Listmonk status=%s %s: %s",
+            tool, getattr(e, "status_code", None), type(mapped).__name__, mapped.message,
+        )
+        raise ToolError(f"{type(mapped).__name__}: {mapped.message}") from e
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        return f"Unexpected error: {str(e)}\n\nTraceback:\n{tb}"
+        logger.exception("Tool %s raised an unexpected error", tool)
+        raise ToolError(f"UnexpectedError: {e}") from e
