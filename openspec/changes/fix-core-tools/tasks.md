@@ -33,8 +33,10 @@
 
 ## 4. Templates and transactional email
 
-- [ ] 4.1 `create_template` gains `subject`, rejects a `tx` template without a subject, and documents that the type can't be changed (template-management). Test both scenarios in `tests/test_templates.py`. Verify: `uv run pytest tests/test_templates.py` passes.
-- [ ] 4.2 Rewrite `send_transactional_email` in the client and server (D7): selectors, mode rules, optional fields left out, `content_type` defaulting to `html`, multipart attachments, and the "queued" description. Add `tests/test_transactional.py` covering every scenario in `specs/transactional-email`. Verify: `uv run pytest tests/test_transactional.py` passes.
+- [x] 4.1 `create_template` gains `subject`, rejects a `tx` template without a subject, and documents that the type can't be changed (template-management). Test both scenarios in `tests/test_templates.py`. Verify: `uv run pytest tests/test_templates.py` passes.
+  - `create_template(name, body, type, subject?, is_default)`. A `tx` template with a missing or blank subject raises `ValidationError` before any request. The docstring says the type can't be changed later. `subject` is sent only when given.
+- [x] 4.2 Rewrite `send_transactional_email` in the client and server (D7): selectors, mode rules, optional fields left out, `content_type` defaulting to `html`, multipart attachments, and the "queued" description. Add `tests/test_transactional.py` covering every scenario in `specs/transactional-email`. Verify: `uv run pytest tests/test_transactional.py` passes.
+  - Server builds the TxMessage payload: one selector, normalized to `subscriber_emails`/`subscriber_ids`; mode checked (and IDs rejected in fallback/external); optional fields sent only when given; `content_type` defaults to `html`. Attachments are `TxAttachment(filename, content_base64, content_type?)` and are decoded strictly. The client sends JSON, or multipart with a `data` part plus `file` parts. Logs one INFO line per send (template, selector, mode, attachment count, no addresses). `tests/test_transactional.py`: 14 passed. Suite: 80 passed.
 
 ## 5. Subscriber records and health
 

@@ -700,15 +700,18 @@ class ListmonkClient:
         name: str,
         body: str,
         type: str = "campaign",
+        subject: str | None = None,
         is_default: bool = False
     ) -> dict[str, Any]:
-        """Create a new email template."""
-        data = {
+        """Create a new email template (tx templates need a subject)."""
+        data: dict[str, Any] = {
             "name": name,
             "body": body,
             "type": type,
             "is_default": is_default
         }
+        if subject is not None:
+            data["subject"] = subject
         return await self._request("POST", "/api/templates", json_data=data)
 
     async def update_template(
@@ -848,19 +851,19 @@ class ListmonkClient:
     # Transactional Email
     async def send_transactional_email(
         self,
-        subscriber_email: str,
-        template_id: int,
-        data: dict[str, Any] | None = None,
-        content_type: str = "html"
+        payload: dict[str, Any],
+        attachments: list[tuple[str, bytes, str]] | None = None,
     ) -> dict[str, Any]:
-        """Send a transactional email."""
-        payload = {
-            "subscriber_email": subscriber_email,
-            "template_id": template_id,
-            "data": data or {},
-            "content_type": content_type
-        }
-        return await self._request("POST", "/api/tx", json_data=payload)
+        """Queue a transactional message via POST /api/tx.
+
+        ``payload`` is Listmonk's TxMessage JSON. With attachments the request is
+        multipart: the JSON goes in a ``data`` part and each file in a ``file`` part.
+        Success only means queued; delivery errors appear in Listmonk's logs.
+        """
+        if not attachments:
+            return await self._request("POST", "/api/tx", json_data=payload)
+        files = [("file", attachment) for attachment in attachments]
+        return await self._request("POST", "/api/tx", form_data={"data": json.dumps(payload)}, files=files)
 
     # Media Operations
     async def get_media(self) -> dict[str, Any]:

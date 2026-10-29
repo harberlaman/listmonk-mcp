@@ -8,6 +8,7 @@ from typing import Any
 
 import typer
 from mcp.server import FastMCP
+from pydantic import BaseModel
 
 from .client import ListmonkAPIError, ListmonkClient, create_client
 from .config import Config, load_config, validate_config
@@ -23,6 +24,8 @@ from .uploads import (
     IMPORT_MAX_BYTES,
     MEDIA_EXTENSIONS,
     MEDIA_MAX_BYTES,
+    content_type_for,
+    decode_base64,
     resolve_upload,
 )
 
@@ -1552,23 +1555,28 @@ async def create_template(
     name: str,
     body: str,
     type: str = "campaign",
+    subject: str | None = None,
     is_default: bool = False
 ) -> str:
     """
-    Create a new email template.
+    Create a new email template. The type cannot be changed after creation.
 
     Args:
         name: Template name
         body: Template HTML body content
-        type: Template type (campaign, tx)
+        type: Template type: campaign (default), campaign_visual or tx
+        subject: Subject line; required for tx (transactional) templates
         is_default: Whether this is the default template
     """
     async def _create_template_logic() -> str:
+        if type == "tx" and not (subject and subject.strip()):
+            raise ValidationError("Transactional (tx) templates need a subject", field="subject")
         client = get_client()
         result = await client.create_template(
             name=name,
             body=body,
             type=type,
+            subject=subject,
             is_default=is_default
         )
 
@@ -1844,31 +1852,112 @@ async def gc_unconfirmed_subscriptions(before_date: str) -> str:
     return await run_tool(_gc_unconfirmed_logic)
 
 
+class TxAttachment(BaseModel):
+    """A file to attach to a transactional message."""
+
+    filename: str
+    content_base64: str
+    content_type: str | None = None
+
+
+TX_SUBSCRIBER_MODES = ("default", "fallback", "external")
+
+
 @mcp.tool()
 async def send_transactional_email(
     template_id: int,
-    subscriber_email: str,
+    subscriber_email: str | None = None,
+    subscriber_id: int | None = None,
+    subscriber_emails: list[str] | None = None,
+    subscriber_ids: list[int] | None = None,
+    subscriber_mode: str | None = None,
+    subject: str | None = None,
+    from_email: str | None = None,
     data: dict[str, Any] | None = None,
-    content_type: str = "html"
+    headers: list[dict[str, str]] | None = None,
+    content_type: str = "html",
+    altbody: str | None = None,
+    messenger: str | None = None,
+    attachments: list[TxAttachment] | None = None,
 ) -> str:
     """
-    Send a transactional email using a template.
+    Queue a transactional message using a tx template.
+
+    Success means Listmonk QUEUED the message, not that it was delivered; SMTP and
+    other delivery errors only appear in Listmonk's logs (use get_logs).
+
+    Give exactly one recipient selector: subscriber_email, subscriber_id,
+    subscriber_emails or subscriber_ids. In "fallback" and "external" modes only
+    email selectors are allowed ("external" sends to addresses that need not be
+    subscribers).
 
     Args:
-        template_id: ID of the template to use
-        subscriber_email: Recipient email address
-        data: Template variables/data
-        content_type: Content type (html, plain)
+        template_id: ID of the tx template
+        subscriber_email: One recipient email
+        subscriber_id: One recipient subscriber ID
+        subscriber_emails: Several recipient emails
+        subscriber_ids: Several recipient subscriber IDs
+        subscriber_mode: "default", "fallback" or "external"
+        subject: Override the template's subject
+        from_email: Override the From address, e.g. "IT <it@example.com>"
+        data: Any JSON object, available in the template as {{ .Tx.Data.* }}
+        headers: Extra headers, one {name: value} object each, e.g. [{"X-Training-ID": "T1"}]
+        content_type: "html" (default), "markdown" or "plain"
+        altbody: Plain-text alternative body
+        messenger: Messenger to send through (default: email)
+        attachments: Files to attach, each {filename, content_base64, content_type?}
     """
     async def _send_transactional_logic() -> str:
-        client = get_client()
-        result = await client.send_transactional_email(
-            template_id=template_id,
-            subscriber_email=subscriber_email,
-            data=data or {},
-            content_type=content_type
-        )
+        selectors = {
+            "subscriber_email": subscriber_email,
+            "subscriber_id": subscriber_id,
+            "subscriber_emails": subscriber_emails,
+            "subscriber_ids": subscriber_ids,
+        }
+        given = [name for name, value in selectors.items() if value]
+        if len(given) != 1:
+            raise ValidationError(
+                "Give exactly one recipient selector: subscriber_email, subscriber_id, "
+                f"subscriber_emails or subscriber_ids (got {', '.join(given) or 'none'})"
+            )
+        if subscriber_mode is not None and subscriber_mode not in TX_SUBSCRIBER_MODES:
+            raise ValidationError(
+                f"subscriber_mode must be one of {', '.join(TX_SUBSCRIBER_MODES)}", field="subscriber_mode"
+            )
+        if subscriber_mode in ("fallback", "external") and given[0] in ("subscriber_id", "subscriber_ids"):
+            raise ValidationError("fallback and external modes take subscriber emails only, not IDs")
 
+        payload: dict[str, Any] = {"template_id": template_id, "content_type": content_type}
+        if subscriber_email:
+            payload["subscriber_emails"] = [subscriber_email]
+        elif subscriber_emails:
+            payload["subscriber_emails"] = subscriber_emails
+        elif subscriber_id:
+            payload["subscriber_ids"] = [subscriber_id]
+        else:
+            payload["subscriber_ids"] = subscriber_ids
+        optional = {
+            "subscriber_mode": subscriber_mode,
+            "subject": subject,
+            "from_email": from_email,
+            "data": data,
+            "headers": headers,
+            "altbody": altbody,
+            "messenger": messenger,
+        }
+        payload.update({key: value for key, value in optional.items() if value is not None})
+
+        files = [
+            (a.filename, decode_base64(a.content_base64, f"attachment {a.filename}"),
+             a.content_type or content_type_for(a.filename))
+            for a in attachments or []
+        ]
+        logger.info(
+            "Queueing tx message: template=%s recipients=%s mode=%s attachments=%d",
+            template_id, given[0], subscriber_mode or "default", len(files),
+        )
+        client = get_client()
+        result = await client.send_transactional_email(payload, files)
         return listmonk_json(result)
 
     return await run_tool(_send_transactional_logic)

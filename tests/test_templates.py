@@ -4,6 +4,8 @@ import json
 from typing import Any
 from urllib.parse import parse_qs
 
+import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 from pytest_httpx import HTTPXMock
 
 from listmonk_mcp import server
@@ -91,3 +93,26 @@ async def test_preview_template_body_posts_form_and_returns_html(
         "template_type": ["campaign"],
     }
     assert "<p>rendered</p>" in result
+
+
+async def test_create_tx_template_with_subject(server_client: ListmonkClient, httpx_mock: HTTPXMock) -> None:
+    created = {"data": {"id": 7, "name": "Shell", "type": "tx", "subject": "Message from IT"}}
+    httpx_mock.add_response(method="POST", url=f"{BASE_URL}/api/templates", json=created)
+
+    result = await server.create_template("Shell", "<p>{{ .Tx.Data.content }}</p>", type="tx", subject="Message from IT")
+
+    request = httpx_mock.get_request()
+    assert request is not None
+    body = json.loads(request.content)
+    assert (body["type"], body["subject"]) == ("tx", "Message from IT")
+    assert json.loads(result) == created
+
+
+@pytest.mark.parametrize("subject", [None, "", "   "])
+async def test_create_tx_template_without_subject_is_rejected(
+    server_client: ListmonkClient, httpx_mock: HTTPXMock, subject: str | None
+) -> None:
+    with pytest.raises(ToolError, match="^ValidationError: Transactional .* need a subject"):
+        await server.create_template("Shell", "<p>x</p>", type="tx", subject=subject)
+
+    assert httpx_mock.get_requests() == []
