@@ -345,7 +345,7 @@ async def manage_subscriber_lists(
 @mcp.tool()
 async def get_subscriber_activity(subscriber_id: int) -> str:
     """
-    Get a subscriber's activity log (opt-ins, bounces, list changes).
+    Get a subscriber's campaign views and link clicks.
 
     Args:
         subscriber_id: ID of the subscriber.
@@ -353,14 +353,23 @@ async def get_subscriber_activity(subscriber_id: int) -> str:
     async def _activity_logic() -> str:
         client = get_client()
         result = await client.get_subscriber_activity(subscriber_id)
-        events = result.get("data", [])
-        if not events:
+        data = result.get("data") or {}
+        views = data.get("campaign_views") or []
+        clicks = data.get("link_clicks") or []
+        if not views and not clicks:
             return f"No activity recorded for subscriber {subscriber_id}"
-        rows = [
-            f"- {e.get('created_at', '?')} | {e.get('type', '?')} | {e.get('list_name') or e.get('subject') or ''}"
-            for e in events
+        lines = [f"Activity for subscriber {subscriber_id}:", f"Campaign views ({len(views)}):"]
+        lines += [
+            f"- {v.get('name')} (ID: {v.get('id')}): {v.get('view_count')} view(s), last {v.get('last_viewed_at')}"
+            for v in views
         ]
-        return f"Activity for subscriber {subscriber_id} ({len(events)} events):\n" + "\n".join(rows)
+        lines.append(f"Link clicks ({len(clicks)}):")
+        lines += [
+            f"- {c.get('url')} in {c.get('campaign_name')} (ID: {c.get('campaign_id')}): "
+            f"{c.get('click_count')} click(s), last {c.get('last_clicked_at')}"
+            for c in clicks
+        ]
+        return "\n".join(lines)
 
     return await safe_execute_async(_activity_logic)  # type: ignore[no-any-return]
 
@@ -1748,7 +1757,8 @@ async def get_about_info() -> str:
     async def _about_logic() -> str:
         client = get_client()
         result = await client.get_about_info()
-        return f"About:\n{result.get('data', {})}"
+        # /api/about is the one endpoint Listmonk returns without a "data" wrapper.
+        return f"About:\n{result}"
 
     return await safe_execute_async(_about_logic)  # type: ignore[no-any-return]
 

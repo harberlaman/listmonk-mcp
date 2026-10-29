@@ -78,3 +78,13 @@ async def test_update_setting_sends_raw_value_not_wrapped(
     request = httpx_mock.get_request(method="PUT", url=url)
     assert request is not None
     assert json.loads(request.content) == "IT <it@example.com>"
+
+
+async def test_about_reads_unwrapped_response(
+    server_client: ListmonkClient, httpx_mock: HTTPXMock
+) -> None:
+    httpx_mock.add_response(
+        method="GET", url=f"{BASE_URL}/api/about", json={"version": "v6.2.0", "build": "v6.2.0 (ef0a7587)"}
+    )
+
+    assert "v6.2.0" in await server.get_about_info()

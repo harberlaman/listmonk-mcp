@@ -1,4 +1,4 @@
-"""subscriber-management: patch_subscriber sends only the given fields."""
+"""subscriber-management: patch_subscriber sends only the given fields; activity rendering."""
 
 import json
 
@@ -41,3 +41,32 @@ async def test_patch_with_nothing_to_change_sends_nothing(
 
     assert result.startswith("Error: ValidationError")
     assert httpx_mock.get_requests() == []
+
+
+async def test_activity_lists_views_and_clicks(
+    server_client: ListmonkClient, httpx_mock: HTTPXMock
+) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE_URL}/api/subscribers/3/activity",
+        json={"data": {
+            "campaign_views": [{"id": 9, "name": "Training 1", "view_count": 2, "last_viewed_at": "2026-10-20T10:00:00Z"}],
+            "link_clicks": [{"url": "https://example.com/t1", "campaign_id": 9, "campaign_name": "Training 1",
+                             "click_count": 1, "last_clicked_at": "2026-10-20T10:01:00Z"}],
+        }},
+    )
+
+    result = await server.get_subscriber_activity(3)
+
+    assert "Training 1 (ID: 9): 2 view(s)" in result
+    assert "https://example.com/t1 in Training 1 (ID: 9): 1 click(s)" in result
+
+
+async def test_activity_empty(server_client: ListmonkClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE_URL}/api/subscribers/3/activity",
+        json={"data": {"campaign_views": [], "link_clicks": []}},
+    )
+
+    assert await server.get_subscriber_activity(3) == "No activity recorded for subscriber 3"
