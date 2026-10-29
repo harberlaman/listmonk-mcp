@@ -2,14 +2,19 @@
 
 ## 1. Baseline
 
-- [ ] 1.1 Run `uv sync --extra dev`, then `uv run ruff check src/ && uv run mypy src/ && uv build` on `master` and record the result. Verify: the commands' output is recorded here, so later failures can be told apart from failures that already existed.
-- [ ] 1.2 Confirm the PR refs are present and unchanged upstream (`git rev-parse refs/upstream-pr/8 refs/upstream-pr/11` against `gh pr view 8 -R rhnvrm/listmonk-mcp --json headRefOid` and the same for 11). Re-fetch if they differ. Verify: the SHAs match.
+- [x] 1.1 Run `uv sync --extra dev`, then `uv run ruff check src/ && uv run mypy src/ && uv build` on `master` and record the result. Verify: the commands' output is recorded here, so later failures can be told apart from failures that already existed.
+  - Baseline (2026-10-28, `3e1cf0d`+2, uv 0.12.21): ruff "All checks passed!", mypy "Success: no issues found in 6 source files", `uv build` produced `listmonk_mcp-0.1.0` sdist and wheel.
+  - NOTE: `uv sync` rewrites `uv.lock` (lock `revision` 2→3, and a stale `version = "0.0.12"` becomes `0.1.0`). Reverted so the merges apply cleanly. Commit a regenerated lock after the merges.
+- [x] 1.2 Confirm the PR refs are present and unchanged upstream (`git rev-parse refs/upstream-pr/8 refs/upstream-pr/11` against `gh pr view 8 -R rhnvrm/listmonk-mcp --json headRefOid` and the same for 11). Re-fetch if they differ. Verify: the SHAs match.
+  - #8 `4fd84c2`, #11 `ccd7600`, both identical to the upstream heads.
 
 ## 2. Merge PR #11 (subject carry-forward)
 
-- [ ] 2.1 `git merge --no-ff refs/upstream-pr/11 -m "Merge upstream PR #11: carry forward subject in update_template"` on `master`. Verify: `git log --oneline -3` shows the merge commit and ohm-meter's commit.
-- [ ] 2.2 Create `tests/conftest.py` (a test `Config`, a `ListmonkClient` with `connect()` bypassed, and pytest-httpx fixtures) and `tests/test_templates.py`, covering the three scenarios in `specs/template-management` under "Template update preserves the existing subject". Verify: `uv run pytest tests/test_templates.py` passes.
-- [ ] 2.3 Run ruff, mypy and build. Verify: all pass, or any failure matches the 1.1 baseline.
+- [x] 2.1 `git merge --no-ff refs/upstream-pr/11 -m "Merge upstream PR #11: carry forward subject in update_template"` on `master`. Verify: `git log --oneline -3` shows the merge commit and ohm-meter's commit.
+  - Merged as `cf363ff` (ohm-meter `ccd7600`).
+- [x] 2.2 Create `tests/conftest.py` (a test `Config`, a `ListmonkClient` with `connect()` bypassed, and pytest-httpx fixtures) and `tests/test_templates.py`, covering the three scenarios in `specs/template-management` under "Template update preserves the existing subject". Verify: `uv run pytest tests/test_templates.py` passes.
+- [x] 2.3 Run ruff, mypy and build. Verify: all pass, or any failure matches the 1.1 baseline.
+  - ruff (src and tests), mypy and build all pass. pytest: 3 passed.
 
 ## 3. Review and merge PR #8 (API coverage)
 
