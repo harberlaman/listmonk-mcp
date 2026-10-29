@@ -28,9 +28,13 @@ The `delete_bounce` tool SHALL delete one bounce. The `delete_subscriber_bounces
 - **WHEN** `delete_bounces` is called with no IDs or an empty list
 - **THEN** every bounce record is deleted, and the tool says that ALL bounces were deleted
 
-### Requirement: Blocklist bounced subscribers
-The `blocklist_bounced_subscribers` tool SHALL blocklist the subscribers behind the given bounce IDs, or behind every bounce when no IDs are given, via `PUT /api/bounces/blocklist`.
+### Requirement: Blocklist all bounced subscribers
+The `blocklist_bounced_subscribers` tool SHALL blocklist every subscriber that has at least one bounce record, via `PUT /api/bounces/blocklist`. It SHALL NOT accept bounce IDs, because Listmonk can't limit this operation to chosen bounces. Its documentation SHALL say that it affects all bounced subscribers.
 
-#### Scenario: Blocklist from specific bounces
-- **WHEN** `blocklist_bounced_subscribers` is called with one bounce ID
-- **THEN** the subscriber on that bounce is blocklisted
+#### Scenario: Blocklist everyone who bounced
+- **WHEN** `blocklist_bounced_subscribers` is called
+- **THEN** every subscriber with a bounce record is blocklisted, and subscribers without bounces are unchanged
+
+#### Scenario: Description warns about scope
+- **WHEN** an MCP client lists tools
+- **THEN** the description of `blocklist_bounced_subscribers` says that it blocklists ALL bounced subscribers, and the tool has no bounce-ID parameter

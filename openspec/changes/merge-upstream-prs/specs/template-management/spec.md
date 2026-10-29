@@ -30,7 +30,7 @@ The `set_default_template` tool SHALL mark the given template as the default for
 - **THEN** Listmonk reports that template as the default, and the tool returns a confirmation naming the template ID
 
 ### Requirement: Preview an unsaved template body
-The `preview_template_body` tool SHALL render a template body that has not been saved, for a given template type (default `campaign`), using `POST /api/templates/preview`, and return the rendered output.
+The `preview_template_body` tool SHALL render a template body that has not been saved, for a given template type (default `campaign`), using `POST /api/templates/preview` with the form fields `body` and `template_type`, and return the rendered output.
 
 #### Scenario: Preview a campaign template body
 - **WHEN** `preview_template_body` is called with a body that contains `{{ template "content" . }}`

@@ -37,7 +37,7 @@ Read #8's diff for:
 - `delete_bounces` treating a missing or empty ID list as "all"
 - `import_subscribers`' separate `AsyncClient`, which builds its own auth header
 
-Record findings as `NOTE:` lines in tasks.md. Fix only what blocks merging, meaning a build/lint/type failure or a wrong endpoint. Defer everything else to the fix change.
+Record findings as `NOTE:` lines in tasks.md. In this change, fix build/lint/type failures, wrong endpoints, and **requests that Listmonk v6.2.0 rejects or handles differently than the tool describes** (decided 2026-10-28 after the review found N1 to N7). Defer return-message style, secret masking and server-side file paths to the fix change.
 - *Why:* it's 1,200 lines of AI-written code. A focused checklist catches the expensive mistakes without turning this change into a rewrite.
 
 ### D3. A small pytest + pytest-httpx suite, not full coverage
@@ -57,6 +57,17 @@ Everything else is checked by hand against a disposable Listmonk (D4).
 Run `docker compose -f docs/listmonk-docker-compose.yml up -d` on a dev machine, create an API user, and point `.env` at `http://localhost:9000`.
 - Read-only tools (`get_about_info`, `get_settings`, `get_logs`, `get_dashboard_*`) may also be run against production to confirm the response shapes.
 - Nothing that writes, deletes or sends runs against production.
+
+### D6. Fixes for the review findings (N1 to N7), made after merging #8
+#8 is merged unchanged (D1), and the fixes land in one separate commit, so `git log` shows exactly what we changed on top of upstream.
+- **N1, N2:** `gc_campaign_analytics(analytics_type, before_date)` and `gc_unconfirmed_subscriptions(before_date)` send `before_date` as a query parameter (Listmonk reads it with `FormValue`, which includes the query string). The tools validate RFC3339 locally, so a bad date never reaches Listmonk.
+- **N3:** `gc_subscribers` documents only `orphan` and `blocklisted`.
+- **N4:** `get_campaign_analytics` requires `from_date` and `to_date`.
+- **N5:** `preview_template_body` posts form-encoded `body` and `template_type`. `ListmonkClient._request` gains an optional form body that sets `Content-Type: application/x-www-form-urlencoded` explicitly, because the client's default `application/json` header would otherwise win.
+  - *Alternative:* a separate one-off HTTP call, as #8's import does. Rejected because it would skip `_request`'s retry and error handling.
+- **N6:** `patch_subscriber(subscriber_id, email?, name?, status?, attributes?, lists?, preconfirm=False)` sends only the given fields. Calling it with nothing to change is an error, raised before any request is sent. This is a **breaking** change to #8's signature (`action` and `target_list_ids` are removed). That's acceptable because nothing has deployed #8 yet, and bulk list actions stay available through `manage_subscriber_lists`.
+- **N7:** `blocklist_bounced_subscribers()` takes no arguments and sends no body. Its description says it blocklists ALL bounced subscribers.
+- **N8 (documentation only):** the `update_setting` and `update_settings` descriptions say that Listmonk reloads afterwards unless a campaign is running. Gating those tools is left to the guardrails change.
 
 ### D5. Push `master`, never push tags in this change
 After verification, `git push origin master`. No `v*` tag, because that would trigger the PyPI publish of a package name owned by upstream. The deploy change decides tag naming and the publish workflow.

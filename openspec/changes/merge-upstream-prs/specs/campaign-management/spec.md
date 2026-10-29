@@ -47,12 +47,12 @@ The `delete_campaign` tool SHALL permanently delete one campaign via `DELETE /ap
 - **THEN** all of those campaigns are deleted and no others
 
 ### Requirement: Campaign statistics and analytics
-The `get_running_campaign_stats` tool SHALL return live stats for running campaigns from `GET /api/campaigns/running/stats`. The `get_campaign_analytics` tool SHALL return `views`, `clicks`, `links` or `bounces` analytics for given campaign IDs and an optional date range, from `GET /api/campaigns/analytics/{type}`.
+The `get_running_campaign_stats` tool SHALL return live stats for running campaigns from `GET /api/campaigns/running/stats`. The `get_campaign_analytics` tool SHALL return `views`, `clicks`, `links` or `bounces` analytics for given campaign IDs over a required `from_date`/`to_date` range, from `GET /api/campaigns/analytics/{type}` (sent as `id`, `from` and `to` query parameters).
 
 #### Scenario: No campaign running
 - **WHEN** `get_running_campaign_stats` is called while no campaign is running
 - **THEN** the tool returns an empty result rather than an error
 
 #### Scenario: Click analytics for one campaign
-- **WHEN** `get_campaign_analytics` is called with `analytics_type="clicks"` and one campaign ID
+- **WHEN** `get_campaign_analytics` is called with `analytics_type="clicks"`, one campaign ID, `from_date="2026-10-01"` and `to_date="2026-10-28"`
 - **THEN** the tool returns Listmonk's click analytics data for that campaign

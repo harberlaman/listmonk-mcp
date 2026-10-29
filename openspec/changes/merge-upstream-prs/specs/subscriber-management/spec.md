@@ -6,12 +6,20 @@ Lets MCP clients manage Listmonk subscribers individually, in bulk by ID, and in
 
 ## ADDED Requirements
 
-### Requirement: Patch a subscriber's lists or status
-The `patch_subscriber` tool SHALL apply a list action (`add`, `remove`, `unsubscribe`) for the given lists, or a status action (`blocklist`, `enable`), to one subscriber via `PATCH /api/subscribers/{id}`. Fields that aren't mentioned SHALL stay unchanged.
+### Requirement: Patch a subscriber's fields
+The `patch_subscriber` tool SHALL send only the fields given (`email`, `name`, `status`, `attributes`, `lists`, `preconfirm`) to `PATCH /api/subscribers/{id}`. Fields that aren't given SHALL keep their stored values. When `lists` is given, it SHALL replace the subscriber's list subscriptions. When it isn't, the subscriptions SHALL stay unchanged.
 
-#### Scenario: Add a subscriber to one more list
-- **WHEN** `patch_subscriber` is called with `action="add"` and one list ID
-- **THEN** the subscriber is on that list, keeps their other lists, and their name, email and attributes are unchanged
+#### Scenario: Change only the status
+- **WHEN** `patch_subscriber` is called with only `status="disabled"`
+- **THEN** the PATCH body is `{"status": "disabled"}`, and the subscriber's name, email, attributes and lists are unchanged
+
+#### Scenario: Replace list subscriptions
+- **WHEN** `patch_subscriber` is called with `lists=[1, 4]`
+- **THEN** the PATCH body carries `lists: [1, 4]`, and afterwards the subscriber is subscribed to exactly lists 1 and 4
+
+#### Scenario: Nothing to change
+- **WHEN** `patch_subscriber` is called with no fields besides the subscriber ID
+- **THEN** no request is sent, and the tool returns an error saying at least one field is required
 
 ### Requirement: Send a fresh opt-in email
 The `subscriber_send_optin` tool SHALL trigger a new double-opt-in confirmation email for a subscriber via `POST /api/subscribers/{id}/optin`.

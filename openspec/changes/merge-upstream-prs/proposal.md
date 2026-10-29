@@ -15,6 +15,7 @@ Upstream `rhnvrm/listmonk-mcp` (v0.1.0) has been inactive since 2026-01-13, but 
   - Templates: `set_default_template`, `preview_template_body`
   - Instance admin: `get_settings`, `update_settings`, `update_setting`, `test_smtp_settings`, `reload_app`, `get_logs`, `get_about_info`, `get_dashboard_counts`, `get_dashboard_charts`, `gc_subscribers`, `gc_campaign_analytics`, `gc_unconfirmed_subscriptions`
 - A test merge (`git merge-tree`, 2026-10-28) shows that #8 and #11 merge cleanly, but both touch `update_template`. The merged result must be reviewed by hand, not trusted because there were no conflicts.
+- Fix the seven #8 tools that the review against the Listmonk v6.2.0 source found to send requests Listmonk rejects or handles differently than described (GC cut-off dates, analytics dates, template preview encoding, `patch_subscriber`, `blocklist_bounced_subscribers`). **BREAKING** relative to #8: `patch_subscriber` loses `action`/`target_list_ids`, and `blocklist_bounced_subscribers` loses `bounce_ids`.
 - Review #8 before merging. It is large and AI-written. Its claims that ruff and mypy pass are checked locally, not taken on trust.
 - Commits go directly to `master` on `harberlaman/listmonk-mcp`, with no PRs.
 - **Not deployable on its own.** #8 registers destructive tools (`update_settings`, `reload_app`, `delete_subscribers_by_query`, `blocklist_subscribers_by_query`, `delete_bounces`, `delete_campaigns`, `gc_*`) with no gate. No tag may be deployed from this change until the guardrails change is done.
