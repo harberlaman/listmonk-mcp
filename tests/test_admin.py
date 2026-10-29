@@ -1,5 +1,7 @@
 """instance-administration: GC tools send Listmonk's required before_date."""
 
+import json
+
 from pytest_httpx import HTTPXMock
 
 from listmonk_mcp import server
@@ -63,3 +65,16 @@ def test_update_setting_docs_warn_about_reload() -> None:
         tool = server.mcp._tool_manager.get_tool(name)
         assert tool is not None
         assert "reloads itself" in tool.description
+
+
+async def test_update_setting_sends_raw_value_not_wrapped(
+    client: ListmonkClient, httpx_mock: HTTPXMock
+) -> None:
+    url = f"{BASE_URL}/api/settings/app.from_email"
+    httpx_mock.add_response(method="PUT", url=url, json={"data": True})
+
+    await client.update_setting("app.from_email", "IT <it@example.com>")
+
+    request = httpx_mock.get_request(method="PUT", url=url)
+    assert request is not None
+    assert json.loads(request.content) == "IT <it@example.com>"

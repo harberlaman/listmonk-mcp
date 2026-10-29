@@ -36,10 +36,14 @@
   - The `subject` from #11 is intact in `client.update_template` and is passed through by `server.update_template`. pytest: 3 passed.
 - [x] 3.4 Fix review findings N1 to N7 in one commit after the #8 merge (design.md D6), each with a mocked-HTTP test. N1/N2: `before_date` on both GC tools, validated as RFC3339 (`tests/test_admin.py`). N3: `gc_subscribers` docs. N4: required analytics dates (`tests/test_campaigns.py`). N5: form-encoded template preview through `_request` (`tests/test_templates.py`). N6: field-based `patch_subscriber`, plus an error when nothing is given (`tests/test_subscribers.py`). N7: `blocklist_bounced_subscribers` with no arguments and an "ALL" warning (`tests/test_bounces.py`). N8: the reload note in the `update_setting(s)` docs. Verify: `uv run pytest` passes, and the commit message lists N1 to N8.
   - Also found while fixing N5: Listmonk answers the preview with raw HTML (`c.HTML`), so #8's `data.preview` lookup always produced an empty preview. The tool now reads the HTML the client stores under `text`. The GC tools now report the `count` Listmonk returns, as the spec requires. pytest: 16 passed.
-- [ ] 3.5 Add `tests/test_admin.py` for `update_setting` (the PUT body is the raw value, not `{"value": …}`) and `tests/test_campaigns.py` for the `test_campaign` payload (saved campaign fields plus `subscribers`). Verify: `uv run pytest` passes.
-- [ ] 3.6 Add `tests/test_bounces.py` for `delete_bounces` (given IDs are passed as `id` params, and no or empty IDs send `all=true`). Verify: `uv run pytest` passes.
-- [ ] 3.7 Add `tests/test_registration.py`, asserting that `create_production_server()` exposes exactly 70 tools, including every tool named in the proposal. Verify: `uv run pytest` passes.
-- [ ] 3.8 Run ruff, mypy, build and the whole suite. Verify: `uv run ruff check src/ && uv run mypy src/ && uv build && uv run pytest` all pass.
+- [x] 3.5 Add `tests/test_admin.py` for `update_setting` (the PUT body is the raw value, not `{"value": …}`) and `tests/test_campaigns.py` for the `test_campaign` payload (saved campaign fields plus `subscribers`). Verify: `uv run pytest` passes.
+  - `update_setting` body is the raw JSON string. `test_campaign` sends all saved fields, with `lists` as IDs, `altbody` None turned into an empty string, and `subscribers`.
+- [x] 3.6 Add `tests/test_bounces.py` for `delete_bounces` (given IDs are passed as `id` params, and no or empty IDs send `all=true`). Verify: `uv run pytest` passes.
+  - IDs are sent as repeated `id` params without `all`. An empty list sends `all=true`, and the tool says ALL.
+- [x] 3.7 Add `tests/test_registration.py`, asserting that `create_production_server()` exposes exactly 70 tools, including every tool named in the proposal. Verify: `uv run pytest` passes.
+  - `create_production_server()` lists 70 tools, including all 41 from #8.
+- [x] 3.8 Run ruff, mypy, build and the whole suite. Verify: `uv run ruff check src/ && uv run mypy src/ && uv build && uv run pytest` all pass.
+  - ruff (src and tests) passes, mypy passes on 6 files, `uv build` produces `listmonk_mcp-0.2.0`, pytest: 21 passed.
 - [ ] 3.9 Update `CLAUDE.md`: the tool count, the `tests/` folder now existing with the command for running one test, and `json_data: Any` on `_request`. Verify: the documented `uv run pytest tests/test_templates.py::<name>` command runs.
 
 ## 4. Manual checks against a disposable Listmonk
