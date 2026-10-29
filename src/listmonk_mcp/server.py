@@ -18,6 +18,7 @@ from .exceptions import (
     ValidationError,
     run_tool,
 )
+from .uploads import MEDIA_EXTENSIONS, MEDIA_MAX_BYTES, resolve_upload
 
 # Global state
 _client: ListmonkClient | None = None
@@ -2009,49 +2010,47 @@ async def get_media_list() -> str:
 
 
 @mcp.tool()
-async def upload_media_file(
-    file_path: str,
-    title: str | None = None
-) -> str:
+async def upload_media(content_base64: str, filename: str) -> str:
     """
-    Upload a media file to Listmonk.
+    Upload an image to Listmonk's media library from base64 content.
+
+    Works for remote clients (no shared filesystem needed). Allowed types: png, jpg,
+    jpeg, gif, webp; at most 5 MB. Returns Listmonk's response, including the media `url`
+    to reference in templates and campaigns. Listmonk does not store a title.
 
     Args:
-        file_path: Absolute path to the image file to upload
-        title: Optional title/description for the media (defaults to filename)
-
-    Returns:
-        Success message with the uploaded file's URL
+        content_base64: The file's bytes, base64-encoded
+        filename: File name including extension, e.g. "logo.png"
     """
     async def _upload_media_logic() -> str:
+        upload = resolve_upload(content_base64=content_base64, filename=filename, file_path=None,
+                                allowed_extensions=MEDIA_EXTENSIONS, max_bytes=MEDIA_MAX_BYTES)
         client = get_client()
-        result = await client.upload_media(file_path, title)
-
-
+        result = await client.upload_media(upload.filename, upload.content, upload.content_type)
         return listmonk_json(result)
 
     return await run_tool(_upload_media_logic)
 
 
 @mcp.tool()
-async def rename_media(media_id: int, new_title: str) -> str:
+async def upload_media_file(file_path: str) -> str:
     """
-    Rename/update the title of a media file.
+    Upload an image from a path on the machine running this server (local stdio use).
+
+    Remote clients should use upload_media instead. Same rules: png, jpg, jpeg, gif,
+    webp; at most 5 MB. Returns Listmonk's response, including the media `url`.
 
     Args:
-        media_id: ID of the media file to rename
-        new_title: New title/description for the media file
-
-    Returns:
-        Success message
+        file_path: Path to the image file on the server's filesystem
     """
-    async def _rename_media_logic() -> str:
+    async def _upload_media_file_logic() -> str:
+        upload = resolve_upload(content_base64=None, filename=None, file_path=file_path,
+                                allowed_extensions=MEDIA_EXTENSIONS, max_bytes=MEDIA_MAX_BYTES)
         client = get_client()
-        result = await client.update_media(media_id, new_title)
-
+        result = await client.upload_media(upload.filename, upload.content, upload.content_type)
         return listmonk_json(result)
 
-    return await run_tool(_rename_media_logic)
+    return await run_tool(_upload_media_file_logic)
 
 
 @mcp.tool()
@@ -2120,7 +2119,7 @@ async def list_media_files() -> str:
 
 {media_items_text}
 
-*Use upload_media_file to add new files, rename_media to update titles, or delete_media_file to remove files.*
+*Use upload_media (or upload_media_file for a local path) to add files, or delete_media_file to remove them.*
 """
 
     except ListmonkAPIError as e:

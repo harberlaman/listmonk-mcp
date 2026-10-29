@@ -14,7 +14,7 @@
   - `headers` is a list of `{name: value}` maps.
   - There's no default `content_type`.
   - Success returns `{"data": true}`, meaning queued.
-  - `POST /api/media` reads only the `file` part and ignores any title.
+  - `POST /api/media` reads only the `file` part and ignores any title, and there's no media update route.
 
 ## Goals / Non-Goals
 
@@ -46,7 +46,7 @@ FastMCP turns `ToolError` into `isError: true`.
 - *Why:* this fixes P3's crash for media and N9's for import at the root, and the spec requires Listmonk's message to reach the client.
 
 ### D3. Write tools return Listmonk's JSON
-Add `listmonk_json(result) -> str` (`json.dumps(result, ensure_ascii=False, indent=2, default=str)`). Every write tool returns `listmonk_json(<client result>)`. Tools that make two calls (for example `upload_media` with a title, D6) return the last response.
+Add `listmonk_json(result) -> str` (`json.dumps(result, ensure_ascii=False, indent=2, default=str)`). Every write tool returns `listmonk_json(<client result>)`. Tools that read before they write (the `*_replace_in_campaign_body` tools) return the write's response.
 - *Why:* this is the handoff §5 rule. Clients and models can see exactly what Listmonk accepted.
 - *Alternative:* MCP structured output (return a `dict`). Rejected for now, because the 22 read tools return `str` and mixing the two would change every schema at once.
 - Tool descriptions are unchanged except where a spec requires a warning (`send_transactional_email`, `delete_bounces`).
@@ -74,8 +74,8 @@ It raises `ValidationError` before any request is sent.
 | Import | `csv`, `zip` | 10 MB |
 
 - **SVG is excluded** from media, because Listmonk serves uploads from a public URL and SVG can carry script.
-- **Title:** Listmonk ignores a title on upload. When a `title` is given, `upload_media` follows with `PUT /api/media/{id}` (the existing `update_media`) and returns that response. Otherwise it returns the upload response, which includes the `url`.
-- `upload_media` is a new tool. `upload_media_file(file_path, title)` keeps its name and signature and goes through the same helper. `import_subscribers` gains `content_base64` and `filename`, and `file_path` becomes optional.
+- **No title:** Listmonk v6.2.0 has no media update route (`GET`, `POST /api/media` and `DELETE /api/media/:id` only), and the upload reads only the `file` part. So neither upload tool takes a `title`. The broken `rename_media` tool and `client.update_media`, which called the non-existent `PUT /api/media/{id}`, are removed (decided 2026-10-29). `upload_media` returns the upload response, which includes the `url`.
+- `upload_media` is a new tool. `upload_media_file(file_path)` keeps its name and goes through the same helper. `import_subscribers` gains `content_base64` and `filename`, and `file_path` becomes optional.
 
 ### D7. Transactional send
 `send_transactional_email(template_id, subscriber_email?, subscriber_id?, subscriber_emails?, subscriber_ids?, subscriber_mode?, subject?, from_email?, data?, headers?, content_type="html", altbody?, messenger?, attachments?)`:

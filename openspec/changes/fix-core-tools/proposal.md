@@ -29,7 +29,7 @@ The same check showed that the 13 `listmonk://` resources never reach clients. T
   - attachments as base64
 
   `content_type` still defaults to `html`, because Listmonk sets no default for transactional sends.
-- **P3:** a new `upload_media` tool takes `content_base64` + `filename` (+ `title`), limited to image types and 5 MB, and returns the media URL. `upload_media_file(file_path)` stays as a fallback for local stdio use, with the same checks.
+- **P3:** a new `upload_media` tool takes `content_base64` + `filename`, limited to image types and 5 MB, and returns the media URL. `upload_media_file(file_path)` stays as a fallback for local stdio use, with the same checks. Neither takes a `title`, because Listmonk v6.2.0 can't store one. **BREAKING:** `upload_media_file` loses its `title` argument, which Listmonk always ignored, and the `rename_media` tool is removed, because it called an endpoint v6.2.0 doesn't have.
 - **N9:** `import_subscribers` also accepts `content_base64` + `filename` (CSV or ZIP, up to 10 MB), keeping `file_path` as the local fallback.
 - **P5:** `get_list_subscribers_tool` and the `listmonk://subscribers` and `listmonk://list/{id}/subscribers` resources return records page by page (id, email, name, status, lists with subscription status, attributes) instead of a count.
 - **P7:** `check_listmonk_health` also reports Listmonk's version and build from `/api/about`.
@@ -39,7 +39,7 @@ The same check showed that the 13 `listmonk://` resources never reach clients. T
 ### New Capabilities
 - `mcp-interface`: how the server presents itself to MCP clients: error signaling, the return format of write and read tools, and which resources are exposed
 - `transactional-email`: sending transactional messages through Listmonk templates to subscribers or external addresses, with headers, overrides and attachments
-- `media-management`: uploading media from remote clients, and listing, renaming and deleting media
+- `media-management`: uploading media from remote clients, and what Listmonk v6.2.0 supports for media (upload, list and delete; no rename)
 
 ### Modified Capabilities
 - `template-management`: adds creating templates with a subject (tx requires one); `set_default_template` returns Listmonk's response instead of a confirmation string

@@ -47,7 +47,7 @@ class ListmonkClient:
             headers={
                 "User-Agent": "Listmonk-MCP-Server/0.1.0",
                 "Accept": "application/json",
-                "Content-Type": "application/json",
+                # No default Content-Type: httpx sets JSON, form or multipart per request.
                 "Authorization": f"token {auth_token}"
             }
         )
@@ -78,40 +78,33 @@ class ListmonkClient:
         params: dict[str, Any] | None = None,
         json_data: Any = None,
         retry_count: int = 0,
-        form_data: dict[str, str] | None = None
+        form_data: dict[str, str] | None = None,
+        files: list[tuple[str, tuple[str, bytes, str]]] | None = None
     ) -> dict[str, Any]:
         """Make HTTP request with retry logic and error handling.
 
-        Pass ``form_data`` for endpoints that read form fields; it is sent
-        form-encoded instead of ``json_data``.
+        Pass ``form_data`` for endpoints that read form fields (sent form-encoded),
+        plus ``files`` for multipart uploads; otherwise ``json_data`` is sent as JSON.
         """
         client = self._get_client()
         url = self._build_url(endpoint)
 
         try:
-            if form_data is not None:
-                # The client's default Content-Type is JSON, so set it explicitly.
-                response = await client.request(
-                    method=method,
-                    url=url,
-                    params=params,
-                    data=form_data,
-                    headers={"Content-Type": "application/x-www-form-urlencoded"}
-                )
-            else:
-                response = await client.request(
-                    method=method,
-                    url=url,
-                    params=params,
-                    json=json_data
-                )
+            response = await client.request(
+                method=method,
+                url=url,
+                params=params,
+                json=json_data if form_data is None and files is None else None,
+                data=form_data,
+                files=files,
+            )
 
             return await self._handle_response(response)
 
         except httpx.RequestError as e:
             if retry_count < self.config.max_retries:
                 await asyncio.sleep(2 ** retry_count)  # Exponential backoff
-                return await self._request(method, endpoint, params, json_data, retry_count + 1, form_data)
+                return await self._request(method, endpoint, params, json_data, retry_count + 1, form_data, files)
 
             raise ListmonkAPIError(f"Request failed: {str(e)}") from e
 
@@ -426,7 +419,6 @@ class ListmonkClient:
         import json as _json
         from pathlib import Path
 
-        url = self._build_url("/api/import/subscribers")
         file_path_obj = Path(file_path)
         if not file_path_obj.exists():
             raise ListmonkAPIError(f"File not found: {file_path}")
@@ -445,24 +437,9 @@ class ListmonkClient:
             "overwrite": overwrite,
         }
 
-        files = {"file": (file_path_obj.name, file_content, content_type)}
-        data = {"params": _json.dumps(params)}
-
-        upload_client = AsyncClient(
-            timeout=self.config.timeout,
-            headers={
-                "Authorization": f"token {self.config.username}:{self.config.password}",
-                "User-Agent": "Listmonk-MCP-Server/0.1.0",
-                "Accept": "application/json",
-            },
-        )
-        try:
-            response = await upload_client.post(url, files=files, data=data)
-            return await self._handle_response(response)
-        except httpx.RequestError as e:
-            raise ListmonkAPIError(f"Subscriber import failed: {str(e)}") from e
-        finally:
-            await upload_client.aclose()
+        files = [("file", (file_path_obj.name, file_content, content_type))]
+        form = {"params": _json.dumps(params)}
+        return await self._request("POST", "/api/import/subscribers", form_data=form, files=files)
 
     async def stop_import(self) -> dict[str, Any]:
         """Stop the currently running subscriber import."""
@@ -899,81 +876,14 @@ class ListmonkClient:
         """Get all media files."""
         return await self._request("GET", "/api/media")
 
-    async def upload_media(self, file_path: str, title: str | None = None) -> dict[str, Any]:
-        """Upload a media file.
+    async def upload_media(self, filename: str, content: bytes, content_type: str) -> dict[str, Any]:
+        """Upload a media file (already checked by uploads.resolve_upload).
 
-        Args:
-            file_path: Absolute path to the file to upload
-            title: Optional title for the media file (defaults to filename)
-
-        Returns:
-            Dict containing the uploaded media data including URL
+        Listmonk v6.2.0 reads only the ``file`` part; it stores no title and has no
+        media update endpoint. The response includes the media ``url``.
         """
-        from pathlib import Path
-
-        url = self._build_url("/api/media")
-
-        file_path_obj = Path(file_path)
-        if not file_path_obj.exists():
-            raise ListmonkAPIError(f"File not found: {file_path}")
-
-        # Determine content type from file extension
-        content_types = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp',
-            '.svg': 'image/svg+xml',
-        }
-        ext = file_path_obj.suffix.lower()
-        content_type = content_types.get(ext, 'application/octet-stream')
-
-        # Use filename as title if not provided
-        if title is None:
-            title = file_path_obj.name
-
-        # Read file content
-        with open(file_path, 'rb') as f:
-            file_content = f.read()
-
-        # Prepare multipart form data
-        files = {
-            'file': (file_path_obj.name, file_content, content_type)
-        }
-        data = {}
-        if title:
-            data['title'] = title
-
-        # Create a new client without Content-Type header for multipart upload
-        # The client will automatically set multipart/form-data with boundary
-        upload_client = AsyncClient(
-            timeout=self.config.timeout,
-            headers={
-                "Authorization": f"token {self.config.username}:{self.config.password}",
-                "User-Agent": "Listmonk-MCP-Server/0.1.0",
-                "Accept": "application/json",
-                # No Content-Type - will be set automatically by httpx for multipart
-            }
-        )
-
-        try:
-            response = await upload_client.post(url, files=files, data=data)
-            return await self._handle_response(response)
-        except httpx.RequestError as e:
-            raise ListmonkAPIError(f"Media upload failed: {str(e)}") from e
-        finally:
-            await upload_client.aclose()
-
-    async def update_media(self, media_id: int, title: str) -> dict[str, Any]:
-        """Update media file metadata (rename).
-
-        Args:
-            media_id: ID of the media file
-            title: New title for the media file
-        """
-        data = {"title": title}
-        return await self._request("PUT", f"/api/media/{media_id}", json_data=data)
+        files = [("file", (filename, content, content_type))]
+        return await self._request("POST", "/api/media", files=files)
 
     async def delete_media(self, media_id: int) -> dict[str, Any]:
         """Delete a media file.

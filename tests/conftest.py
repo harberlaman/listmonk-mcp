@@ -20,10 +20,10 @@ def config() -> Config:
 async def client(config: Config) -> AsyncIterator[ListmonkClient]:
     """A client with an open HTTP session, skipping connect()'s live health check."""
     listmonk = ListmonkClient(config)
-    # Same default headers as connect(), so per-request overrides are exercised.
+    # Same default headers as connect() (no Content-Type), so per-request encoding is exercised.
     listmonk._client = httpx.AsyncClient(
         timeout=config.timeout,
-        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        headers={"Accept": "application/json", "Authorization": f"token {config.username}:{config.password}"},
     )
     yield listmonk
     await listmonk.close()

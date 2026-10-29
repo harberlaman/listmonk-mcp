@@ -24,4 +24,6 @@ def test_production_server_exposes_all_70_tools() -> None:
 
     assert len(PR8_TOOLS) == 41
     assert PR8_TOOLS <= tools
+    # fix-core-tools added upload_media and removed rename_media (no media update route in v6.2.0).
+    assert "upload_media" in tools and "rename_media" not in tools
     assert len(tools) == 70
