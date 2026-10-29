@@ -64,7 +64,8 @@
   - Torn down with `down -v`; credential files deleted.
 - [x] 6.3 Update `CLAUDE.md`: the `run_tool`, `ValidationError` and `ToolError` error pattern; write tools returning `listmonk_json`; the single `FastMCP` with resources served; no default `Content-Type`; the upload helper. Verify: the documented test commands run.
   - Architecture and conventions rewritten: the single `FastMCP`, no default `Content-Type`, `uploads.py`, `run_tool`/`ValidationError`/`ToolError`, `listmonk_json` for writes, `format_subscribers`, keeping the registration count up to date, the response-shape notes (`/api/about`, no media update route) and `root_url` for media URLs. The documented single-test command and the full suite run (86 passed).
-- [ ] 6.4 Commit to `master` and push with no tags. Before pushing, scan the outgoing history for internal host and container names. Verify: `git status -sb` is level with `origin/master`, and the scan finds nothing.
+- [x] 6.4 Commit to `master` and push with no tags. Before pushing, scan the outgoing history for internal host and container names. Verify: `git status -sb` is level with `origin/master`, and the scan finds nothing.
+  - The outgoing history scan found no internal host or container names. Pushed `4070e3f..6d96187` with no tags; the remote tags are still only the inherited `v0.0.1`, `v0.0.2` and `v0.1.0`.
 
 ## Workflow follow-up
 
