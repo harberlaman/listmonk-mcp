@@ -20,6 +20,19 @@ def config() -> Config:
 async def client(config: Config) -> AsyncIterator[ListmonkClient]:
     """A client with an open HTTP session, skipping connect()'s live health check."""
     listmonk = ListmonkClient(config)
-    listmonk._client = httpx.AsyncClient(timeout=config.timeout)
+    # Same default headers as connect(), so per-request overrides are exercised.
+    listmonk._client = httpx.AsyncClient(
+        timeout=config.timeout,
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+    )
     yield listmonk
     await listmonk.close()
+
+
+@pytest.fixture
+def server_client(client: ListmonkClient, monkeypatch: pytest.MonkeyPatch) -> ListmonkClient:
+    """Install the mocked client as the server's global so MCP tool functions use it."""
+    from listmonk_mcp import server
+
+    monkeypatch.setattr(server, "_client", client)
+    return client

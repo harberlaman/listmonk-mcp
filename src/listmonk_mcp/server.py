@@ -2,6 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 
 import typer
@@ -18,6 +19,24 @@ _config: Config | None = None
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _is_rfc3339(value: str) -> bool:
+    """True for a full RFC3339 timestamp with a UTC offset, as Listmonk's Go parser requires."""
+    if "T" not in value:
+        return False
+    try:
+        return datetime.fromisoformat(value).tzinfo is not None
+    except ValueError:
+        return False
+
+
+def _invalid_before_date(before_date: str) -> str:
+    logger.warning("Rejected non-RFC3339 before_date %r", before_date)
+    return (
+        "Error: ValidationError - before_date must be an RFC3339 timestamp "
+        f"with a UTC offset (e.g. 2026-01-01T00:00:00Z), got {before_date!r}"
+    )
 
 
 @asynccontextmanager
@@ -207,23 +226,43 @@ async def change_subscriber_status(subscriber_id: int, status: str) -> str:
 @mcp.tool()
 async def patch_subscriber(
     subscriber_id: int,
-    action: str,
-    target_list_ids: list[int] | None = None,
+    email: str | None = None,
+    name: str | None = None,
     status: str | None = None,
+    attributes: dict[str, Any] | None = None,
+    lists: list[int] | None = None,
+    preconfirm: bool = False,
 ) -> str:
     """
-    Patch a subscriber's lists or status (more surgical than update_subscriber).
+    Partially update a subscriber. Only the fields you pass are changed.
+
+    To add or remove lists without replacing them all, use manage_subscriber_lists.
 
     Args:
         subscriber_id: ID of the subscriber to patch.
-        action: One of "add", "remove", "unsubscribe" (lists) or "blocklist" / "enable" (status).
-        target_list_ids: List IDs (for list-related actions).
-        status: New status (for status-related actions).
+        email: New email address.
+        name: New name.
+        status: New status (enabled, disabled, blocklisted).
+        attributes: Attributes to set on the subscriber.
+        lists: List IDs that REPLACE the subscriber's current subscriptions.
+        preconfirm: Preconfirm subscriptions to the given lists.
     """
     async def _patch_logic() -> str:
+        if all(v is None for v in (email, name, status, attributes, lists)):
+            return "Error: ValidationError - patch_subscriber needs at least one field to change"
         client = get_client()
-        await client.patch_subscriber(subscriber_id, action, target_list_ids, status)
-        return f"Successfully patched subscriber {subscriber_id} (action={action})"
+        await client.patch_subscriber(
+            subscriber_id,
+            email=email,
+            name=name,
+            status=status,
+            attribs=attributes,
+            lists=lists,
+            preconfirm_subscriptions=preconfirm,
+        )
+        changed = [k for k, v in (("email", email), ("name", name), ("status", status),
+                                  ("attributes", attributes), ("lists", lists)) if v is not None]
+        return f"Successfully patched subscriber {subscriber_id} ({', '.join(changed)})"
 
     return await safe_execute_async(_patch_logic)  # type: ignore[no-any-return]
 
@@ -523,18 +562,17 @@ async def delete_bounces(bounce_ids: list[int] | None = None) -> str:
 
 
 @mcp.tool()
-async def blocklist_bounced_subscribers(bounce_ids: list[int] | None = None) -> str:
+async def blocklist_bounced_subscribers() -> str:
     """
-    Blocklist subscribers who appear in specific bounces (or all bounces if empty).
+    Blocklist ALL bounced subscribers: every subscriber with any bounce record.
 
-    Args:
-        bounce_ids: Specific bounce IDs, or None/empty to blocklist subscribers from all bounces.
+    Listmonk cannot limit this to specific bounces. To blocklist chosen
+    subscribers, use blocklist_subscriber or blocklist_subscribers instead.
     """
     async def _blbb_logic() -> str:
         client = get_client()
-        await client.blocklist_bounced_subscribers(bounce_ids)
-        scope = f"{len(bounce_ids)} specified bounces" if bounce_ids else "all bounces"
-        return f"Successfully blocklisted subscribers from {scope}"
+        await client.blocklist_bounced_subscribers()
+        return "Successfully blocklisted ALL bounced subscribers"
 
     return await safe_execute_async(_blbb_logic)  # type: ignore[no-any-return]
 
@@ -1179,8 +1217,8 @@ async def get_running_campaign_stats() -> str:
 async def get_campaign_analytics(
     analytics_type: str,
     campaign_ids: list[int],
-    from_date: str | None = None,
-    to_date: str | None = None,
+    from_date: str,
+    to_date: str,
 ) -> str:
     """
     Get campaign analytics (views, clicks, links, or bounces).
@@ -1188,8 +1226,8 @@ async def get_campaign_analytics(
     Args:
         analytics_type: One of "views", "clicks", "links", "bounces".
         campaign_ids: Campaigns to fetch analytics for.
-        from_date: Optional ISO date lower bound (e.g. "2026-01-01").
-        to_date: Optional ISO date upper bound.
+        from_date: ISO date lower bound, required (e.g. "2026-01-01").
+        to_date: ISO date upper bound, required (e.g. "2026-01-31").
     """
     async def _analytics_logic() -> str:
         client = get_client()
@@ -1602,8 +1640,8 @@ async def preview_template_body(body: str, template_type: str = "campaign") -> s
     async def _preview_body_logic() -> str:
         client = get_client()
         result = await client.preview_template_body(body, template_type)
-        d = result.get("data", {})
-        rendered = d.get("preview") if isinstance(d, dict) else d
+        # Listmonk answers with raw HTML, which the client returns under "text".
+        rendered = result.get("text", "")
         return f"# Template Preview\n\n{rendered}"
 
     return await safe_execute_async(_preview_body_logic)  # type: ignore[no-any-return]
@@ -1636,6 +1674,8 @@ async def update_settings(settings: dict[str, Any]) -> str:
     overwrites real values with literal bullets. Strip any password/token/secret
     keys from `settings` before calling this — or prefer `update_setting` for
     a single key.
+
+    Listmonk reloads itself after this call unless a campaign is running.
     """
     async def _update_settings_logic() -> str:
         client = get_client()
@@ -1649,6 +1689,8 @@ async def update_settings(settings: dict[str, Any]) -> str:
 async def update_setting(key: str, value: Any) -> str:
     """
     Update a single settings key (avoids the password-masking footgun).
+
+    Listmonk reloads itself after this call unless a campaign is running.
 
     Args:
         key: Dotted setting key (e.g. "appearance.public.custom_css").
@@ -1741,44 +1783,51 @@ async def gc_subscribers(gc_type: str) -> str:
     Garbage collect subscribers.
 
     Args:
-        gc_type: One of "blocklisted", "orphan", "unconfirmed".
+        gc_type: One of "blocklisted", "orphan" (subscribers on no list).
     """
     async def _gc_subs_logic() -> str:
         client = get_client()
-        await client.gc_subscribers(gc_type)
-        return f"Successfully ran subscriber GC ({gc_type})"
+        result = await client.gc_subscribers(gc_type)
+        count = result.get("data", {}).get("count", "unknown")
+        return f"Successfully ran subscriber GC ({gc_type}): {count} deleted"
 
     return await safe_execute_async(_gc_subs_logic)  # type: ignore[no-any-return]
 
 
 @mcp.tool()
-async def gc_campaign_analytics(analytics_type: str) -> str:
+async def gc_campaign_analytics(analytics_type: str, before_date: str) -> str:
     """
-    Garbage collect campaign analytics.
+    Delete campaign analytics recorded before a cut-off.
 
     Args:
-        analytics_type: One of "views", "clicks", "links", "bounces", "all".
+        analytics_type: One of "views", "clicks", "all".
+        before_date: RFC3339 cut-off, e.g. "2026-01-01T00:00:00Z"; older data is deleted.
     """
     async def _gc_analytics_logic() -> str:
+        if not _is_rfc3339(before_date):
+            return _invalid_before_date(before_date)
         client = get_client()
-        await client.gc_campaign_analytics(analytics_type)
-        return f"Successfully ran analytics GC ({analytics_type})"
+        await client.gc_campaign_analytics(analytics_type, before_date)
+        return f"Successfully ran analytics GC ({analytics_type}) before {before_date}"
 
     return await safe_execute_async(_gc_analytics_logic)  # type: ignore[no-any-return]
 
 
 @mcp.tool()
-async def gc_unconfirmed_subscriptions(before: str) -> str:
+async def gc_unconfirmed_subscriptions(before_date: str) -> str:
     """
     Delete unconfirmed double-opt-in subscriptions older than the given timestamp.
 
     Args:
-        before: ISO timestamp; subscriptions created before this are removed.
+        before_date: RFC3339 cut-off, e.g. "2026-01-01T00:00:00Z"; older subscriptions are removed.
     """
     async def _gc_unconfirmed_logic() -> str:
+        if not _is_rfc3339(before_date):
+            return _invalid_before_date(before_date)
         client = get_client()
-        await client.gc_unconfirmed_subscriptions(before)
-        return f"Successfully GC'd unconfirmed subscriptions before {before}"
+        result = await client.gc_unconfirmed_subscriptions(before_date)
+        count = result.get("data", {}).get("count", "unknown")
+        return f"Successfully GC'd unconfirmed subscriptions before {before_date}: {count} deleted"
 
     return await safe_execute_async(_gc_unconfirmed_logic)  # type: ignore[no-any-return]
 

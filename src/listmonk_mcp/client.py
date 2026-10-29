@@ -77,26 +77,41 @@ class ListmonkClient:
         endpoint: str,
         params: dict[str, Any] | None = None,
         json_data: Any = None,
-        retry_count: int = 0
+        retry_count: int = 0,
+        form_data: dict[str, str] | None = None
     ) -> dict[str, Any]:
-        """Make HTTP request with retry logic and error handling."""
+        """Make HTTP request with retry logic and error handling.
+
+        Pass ``form_data`` for endpoints that read form fields; it is sent
+        form-encoded instead of ``json_data``.
+        """
         client = self._get_client()
         url = self._build_url(endpoint)
 
         try:
-            response = await client.request(
-                method=method,
-                url=url,
-                params=params,
-                json=json_data
-            )
+            if form_data is not None:
+                # The client's default Content-Type is JSON, so set it explicitly.
+                response = await client.request(
+                    method=method,
+                    url=url,
+                    params=params,
+                    data=form_data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                )
+            else:
+                response = await client.request(
+                    method=method,
+                    url=url,
+                    params=params,
+                    json=json_data
+                )
 
             return await self._handle_response(response)
 
         except httpx.RequestError as e:
             if retry_count < self.config.max_retries:
                 await asyncio.sleep(2 ** retry_count)  # Exponential backoff
-                return await self._request(method, endpoint, params, json_data, retry_count + 1)
+                return await self._request(method, endpoint, params, json_data, retry_count + 1, form_data)
 
             raise ListmonkAPIError(f"Request failed: {str(e)}") from e
 
@@ -214,24 +229,31 @@ class ListmonkClient:
     async def patch_subscriber(
         self,
         subscriber_id: int,
-        action: str,
-        target_list_ids: list[int] | None = None,
+        email: str | None = None,
+        name: str | None = None,
         status: str | None = None,
+        attribs: dict[str, Any] | None = None,
+        lists: list[int] | None = None,
+        preconfirm_subscriptions: bool = False,
     ) -> dict[str, Any]:
-        """Patch a subscriber's lists or status.
+        """Partially update a subscriber; only the given fields are sent.
 
-        Args:
-            subscriber_id: Subscriber to patch.
-            action: One of "add", "remove", "unsubscribe" (lists),
-                or "blocklist" / "enable" (status).
-            target_list_ids: List IDs (for list-related actions).
-            status: New status (for status-related actions).
+        Listmonk keeps stored values for omitted fields. ``lists``, when given,
+        replaces the subscriber's list subscriptions.
         """
-        data: dict[str, Any] = {"action": action}
-        if target_list_ids is not None:
-            data["target_list_ids"] = target_list_ids
+        data: dict[str, Any] = {}
+        if email is not None:
+            data["email"] = email
+        if name is not None:
+            data["name"] = name
         if status is not None:
             data["status"] = status
+        if attribs is not None:
+            data["attribs"] = attribs
+        if lists is not None:
+            data["lists"] = lists
+        if preconfirm_subscriptions:
+            data["preconfirm_subscriptions"] = True
         return await self._request("PATCH", f"/api/subscribers/{subscriber_id}", json_data=data)
 
     async def subscriber_send_optin(self, subscriber_id: int) -> dict[str, Any]:
@@ -366,12 +388,12 @@ class ListmonkClient:
             return await self._request("DELETE", "/api/bounces", params=params)
         return await self._request("DELETE", "/api/bounces", params={"all": "true"})
 
-    async def blocklist_bounced_subscribers(
-        self, bounce_ids: list[int] | None = None
-    ) -> dict[str, Any]:
-        """Blocklist subscribers attached to specific bounces (or all if empty)."""
-        data: dict[str, Any] = {"all": not bool(bounce_ids), "ids": bounce_ids or []}
-        return await self._request("PUT", "/api/bounces/blocklist", json_data=data)
+    async def blocklist_bounced_subscribers(self) -> dict[str, Any]:
+        """Blocklist ALL subscribers that have any bounce record.
+
+        Listmonk ignores any request body here; it cannot target specific bounces.
+        """
+        return await self._request("PUT", "/api/bounces/blocklist")
 
     # Subscriber Import Operations
     async def get_import_status(self) -> dict[str, Any]:
@@ -678,22 +700,22 @@ class ListmonkClient:
         self,
         analytics_type: str,
         campaign_ids: list[int],
-        from_date: str | None = None,
-        to_date: str | None = None,
+        from_date: str,
+        to_date: str,
     ) -> dict[str, Any]:
         """Get campaign analytics by type (views, clicks, links, bounces).
 
         Args:
             analytics_type: One of "views", "clicks", "links", "bounces".
             campaign_ids: Campaigns to fetch analytics for.
-            from_date: Optional ISO date lower bound.
-            to_date: Optional ISO date upper bound.
+            from_date: ISO date lower bound (required by Listmonk).
+            to_date: ISO date upper bound (required by Listmonk).
         """
-        params: dict[str, Any] = {"id": [str(cid) for cid in campaign_ids]}
-        if from_date is not None:
-            params["from"] = from_date
-        if to_date is not None:
-            params["to"] = to_date
+        params: dict[str, Any] = {
+            "id": [str(cid) for cid in campaign_ids],
+            "from": from_date,
+            "to": to_date,
+        }
         return await self._request("GET", f"/api/campaigns/analytics/{analytics_type}", params=params)
 
     # Template Operations
@@ -769,9 +791,13 @@ class ListmonkClient:
         body: str,
         template_type: str = "campaign",
     ) -> dict[str, Any]:
-        """Render a preview of a template body without saving it."""
-        data = {"body": body, "type": template_type}
-        return await self._request("POST", "/api/templates/preview", json_data=data)
+        """Render a preview of a template body without saving it.
+
+        Listmonk reads form fields here and responds with raw HTML, which
+        ``_handle_response`` returns under the ``text`` key.
+        """
+        form = {"body": body, "template_type": template_type}
+        return await self._request("POST", "/api/templates/preview", form_data=form)
 
     # Settings & Admin Operations
     async def get_settings(self) -> dict[str, Any]:
@@ -784,6 +810,8 @@ class ListmonkClient:
         WARNING: GET /api/settings returns secret fields (passwords, tokens) masked
         as bullets ("•••"). PUTting that body back overwrites the real values with
         literal bullets. Strip secret-looking keys before calling this.
+
+        Listmonk reloads itself after this call unless a campaign is running.
         """
         return await self._request("PUT", "/api/settings", json_data=settings)
 
@@ -795,6 +823,8 @@ class ListmonkClient:
         the body must be the value itself (e.g. a JSON string for a string
         setting), NOT wrapped in {"value": ...}. Wrapping causes listmonk
         to store the whole object and breaks the field.
+
+        Listmonk reloads itself after this call unless a campaign is running.
         """
         return await self._request("PUT", f"/api/settings/{key}", json_data=value)
 
@@ -827,20 +857,24 @@ class ListmonkClient:
         """Garbage collect subscribers.
 
         Args:
-            gc_type: One of "blocklisted", "orphan", "unconfirmed".
+            gc_type: One of "blocklisted", "orphan".
         """
         return await self._request("DELETE", f"/api/maintenance/subscribers/{gc_type}")
 
-    async def gc_campaign_analytics(self, analytics_type: str) -> dict[str, Any]:
-        """Garbage collect campaign analytics ("views", "clicks", "links", "bounces", "all")."""
-        return await self._request("DELETE", f"/api/maintenance/analytics/{analytics_type}")
+    async def gc_campaign_analytics(self, analytics_type: str, before_date: str) -> dict[str, Any]:
+        """Delete campaign analytics ("views", "clicks", "all") older than an RFC3339 timestamp."""
+        return await self._request(
+            "DELETE",
+            f"/api/maintenance/analytics/{analytics_type}",
+            params={"before_date": before_date},
+        )
 
-    async def gc_unconfirmed_subscriptions(self, before: str) -> dict[str, Any]:
-        """Delete unconfirmed double-opt-in subscriptions older than the given ISO timestamp."""
+    async def gc_unconfirmed_subscriptions(self, before_date: str) -> dict[str, Any]:
+        """Delete unconfirmed double-opt-in subscriptions older than an RFC3339 timestamp."""
         return await self._request(
             "DELETE",
             "/api/maintenance/subscriptions/unconfirmed",
-            params={"before": before},
+            params={"before_date": before_date},
         )
 
     # Transactional Email

@@ -1,10 +1,12 @@
-"""template-management: update_template keeps the stored subject (upstream PR #11)."""
+"""template-management: subject carry-forward (upstream PR #11) and body preview."""
 
 import json
 from typing import Any
+from urllib.parse import parse_qs
 
 from pytest_httpx import HTTPXMock
 
+from listmonk_mcp import server
 from listmonk_mcp.client import ListmonkClient
 
 from .conftest import BASE_URL
@@ -68,3 +70,24 @@ async def test_template_without_stored_subject_sends_no_subject(
     await client.update_template(5, body="<p>new</p>")
 
     assert "subject" not in put_body(httpx_mock)
+
+
+async def test_preview_template_body_posts_form_and_returns_html(
+    server_client: ListmonkClient, httpx_mock: HTTPXMock
+) -> None:
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{BASE_URL}/api/templates/preview",
+        html="<html><p>rendered</p></html>",
+    )
+
+    result = await server.preview_template_body('<p>{{ template "content" . }}</p>', "campaign")
+
+    request = httpx_mock.get_request(method="POST", url=f"{BASE_URL}/api/templates/preview")
+    assert request is not None
+    assert request.headers["Content-Type"] == "application/x-www-form-urlencoded"
+    assert parse_qs(request.content.decode()) == {
+        "body": ['<p>{{ template "content" . }}</p>'],
+        "template_type": ["campaign"],
+    }
+    assert "<p>rendered</p>" in result
