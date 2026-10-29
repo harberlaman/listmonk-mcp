@@ -181,3 +181,12 @@ listmonk-mcp
 - **Connection refused**: Listmonk server not running or wrong URL
 - **Module not found**: Install dependencies with `uv install` or `pip install -e .`
 
+## Listmonk Version and Updates
+
+This server is tested against **Listmonk v6.2.0**. Request and response shapes were checked against that release's source, and some endpoints behave differently in other versions (for example, v6.2.0 has no media update endpoint).
+
+- **Which version is running:** `check_listmonk_health` reports Listmonk's version and build, and `get_about_info` returns the full `/api/about` details. `/api/about` only describes the running instance; it says nothing about newer releases.
+- **Whether an update exists:** when Listmonk's `app.check_updates` setting is on, Listmonk checks `https://update.listmonk.app/update.json` once a day and shows the result in `GET /api/config` (`update.release_version`, `update.is_new`, `update.url`, plus maintainer `messages`). This server does not expose `/api/config`; use the Listmonk admin UI or call the endpoint directly.
+- **Breaking changes in Listmonk:** no Listmonk endpoint lists them. Read the [Listmonk release notes](https://github.com/knadh/listmonk/releases) before upgrading Listmonk, then re-run this server's tests and a check against the upgraded instance.
+
+Changes to this server itself, including breaking changes to tool names, arguments and return values, are listed in [CHANGELOG.md](CHANGELOG.md).
