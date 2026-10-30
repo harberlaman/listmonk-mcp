@@ -2,12 +2,16 @@
 
 import json
 import logging
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
 import typer
 from mcp.server import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
+from mcp.types import ContentBlock
+from mcp.types import Tool as MCPTool
 from pydantic import BaseModel
 
 from .client import ListmonkAPIError, ListmonkClient, create_client
@@ -19,6 +23,7 @@ from .exceptions import (
     ValidationError,
     run_tool,
 )
+from .masking import mask_settings
 from .uploads import (
     IMPORT_EXTENSIONS,
     IMPORT_MAX_BYTES,
@@ -91,9 +96,10 @@ async def lifespan(app: Any) -> Any:
     global _client, _config
 
     try:
-        # Load and validate configuration
-        _config = load_config()
-        validate_config()
+        # Reuse the configuration run() loaded; load it here for servers started any other way
+        if _config is None:
+            _config = load_config()
+            validate_config()
 
         logger.info(f"Connecting to Listmonk at {_config.url}")
 
@@ -113,13 +119,48 @@ async def lifespan(app: Any) -> Any:
             logger.info("Listmonk client disconnected")
 
 
+class GuardedFastMCP(FastMCP):
+    """FastMCP that hides some registered tools from clients: not listed, and unknown when called."""
+
+    hidden_tools: frozenset[str] = frozenset()
+
+    async def list_tools(self) -> list[MCPTool]:
+        return [tool for tool in await super().list_tools() if tool.name not in self.hidden_tools]
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Sequence[ContentBlock] | dict[str, Any]:
+        if name in self.hidden_tools:
+            raise ToolError(f"Unknown tool: {name}")
+        return await super().call_tool(name, arguments)
+
+
 # Tools and resources register directly on the server that runs; the lifespan
 # only executes when the server starts, so importing this module connects to nothing.
-mcp = FastMCP("Listmonk MCP Server", lifespan=lifespan)
+mcp = GuardedFastMCP("Listmonk MCP Server", lifespan=lifespan)
+
+# Hidden unless LISTMONK_MCP_ALLOW_DANGEROUS is set: they act on every record or on
+# records chosen by a query, or reload Listmonk (both settings writes do).
+DANGEROUS_TOOLS = frozenset({
+    "update_settings", "update_setting", "reload_app",
+    "delete_subscribers_by_query", "blocklist_subscribers_by_query", "manage_subscriber_lists_by_query",
+    "blocklist_bounced_subscribers", "delete_all_bounces", "delete_campaigns",
+    "gc_subscribers", "gc_campaign_analytics", "gc_unconfirmed_subscriptions",
+})
 
 
-def create_production_server() -> FastMCP:
-    """Return the MCP server with every tool, resource and resource template."""
+def create_production_server(allow_dangerous: bool = False) -> FastMCP:
+    """Return the MCP server, exposing the dangerous tools only when allowed."""
+    missing = sorted(name for name in DANGEROUS_TOOLS if mcp._tool_manager.get_tool(name) is None)
+    if missing:
+        raise RuntimeError(f"DANGEROUS_TOOLS names unregistered tools: {', '.join(missing)}")
+
+    mcp.hidden_tools = frozenset() if allow_dangerous else DANGEROUS_TOOLS
+    if allow_dangerous:
+        logger.info("Dangerous tools enabled (LISTMONK_MCP_ALLOW_DANGEROUS is set)")
+    else:
+        logger.info(
+            "Dangerous tools disabled (LISTMONK_MCP_ALLOW_DANGEROUS unset): %d tools hidden",
+            len(DANGEROUS_TOOLS),
+        )
     return mcp
 
 
@@ -591,19 +632,32 @@ async def delete_bounce(bounce_id: int) -> str:
 
 
 @mcp.tool()
-async def delete_bounces(bounce_ids: list[int] | None = None) -> str:
+async def delete_bounces(bounce_ids: list[int]) -> str:
     """
-    Delete bounce records. Giving no IDs (None or an empty list) deletes ALL bounces.
+    Delete the given bounce records. At least one ID is required; this tool never deletes all bounces.
 
     Args:
-        bounce_ids: Specific bounce IDs to delete. Leave empty only to delete ALL bounces.
+        bounce_ids: Bounce IDs to delete (at least one).
     """
     async def _del_bounces_logic() -> str:
+        if not bounce_ids:
+            raise ValidationError("At least one bounce ID is required", field="bounce_ids", value=bounce_ids)
         client = get_client()
         result = await client.delete_bounces(bounce_ids)
         return listmonk_json(result)
 
     return await run_tool(_del_bounces_logic)
+
+
+@mcp.tool()
+async def delete_all_bounces() -> str:
+    """Delete ALL bounce records in Listmonk. To delete chosen bounces, use delete_bounces."""
+    async def _del_all_bounces_logic() -> str:
+        client = get_client()
+        result = await client.delete_all_bounces()
+        return listmonk_json(result)
+
+    return await run_tool(_del_all_bounces_logic)
 
 
 @mcp.tool()
@@ -1649,19 +1703,23 @@ async def preview_template_body(body: str, template_type: str = "campaign") -> s
 
 
 # Settings & System Tools
+
+# Size of Listmonk's in-memory log buffer (v6.2.0 cmd/main.go).
+LOG_MAX_LINES = 5000
+
+
 @mcp.tool()
 async def get_settings() -> str:
     """
     Get the full server settings document.
 
-    Note: secret fields (passwords, tokens) are masked as bullets in the response.
-    Do not PUT this back via update_settings — use update_setting for individual keys
-    or scrub secret-looking keys first.
+    Secret values (passwords, secrets, API keys) are shown as ******** and empty ones as "".
+    Never write this output back to Listmonk: the masks would overwrite the real secrets.
     """
     async def _get_settings_logic() -> str:
         client = get_client()
         result = await client.get_settings()
-        return f"Settings:\n{result.get('data', {})}"
+        return f"Settings:\n{mask_settings(result.get('data', {}))}"
 
     return await run_tool(_get_settings_logic)
 
@@ -1733,12 +1791,25 @@ async def reload_app() -> str:
 
 
 @mcp.tool()
-async def get_logs() -> str:
-    """Get recent server logs."""
+async def get_logs(lines: int = 100) -> str:
+    """
+    Get the last lines of Listmonk's server log, oldest first. SMTP delivery errors show up here.
+
+    Args:
+        lines: How many of the most recent lines to return, 1 to 5000 (Listmonk keeps at most 5000).
+    """
     async def _logs_logic() -> str:
+        if not 1 <= lines <= LOG_MAX_LINES:
+            raise ValidationError(
+                f"lines must be between 1 and {LOG_MAX_LINES}, got {lines}", field="lines", value=lines
+            )
         client = get_client()
         result = await client.get_logs()
-        return f"Logs:\n{result.get('data', '')}"
+        entries = result.get("data")
+        if not isinstance(entries, list):
+            entries = []
+        shown = entries[-lines:]
+        return "\n".join([f"Logs: last {len(shown)} of {len(entries)} lines", *map(str, shown)])
 
     return await run_tool(_logs_logic)
 
@@ -2454,7 +2525,11 @@ def run(
     - LISTMONK_MCP_MAX_RETRIES: Maximum retry attempts (default: 3)
     - LISTMONK_MCP_DEBUG: Enable debug mode (default: false)
     - LISTMONK_MCP_LOG_LEVEL: Logging level (default: INFO)
+    - LISTMONK_MCP_ALLOW_DANGEROUS: Expose the 12 tools that act on every record,
+      act by query or reload Listmonk (default: false)
     """
+    global _config
+
     if version:
         # Import here to avoid circular imports
         try:
@@ -2471,8 +2546,10 @@ def run(
 
     try:
         logger.info("Starting Listmonk MCP Server...")
-        # Create the production MCP server with lifespan management
-        server = create_production_server()
+        # The dangerous-tools flag must be known before the server lists any tool
+        _config = load_config()
+        validate_config()
+        server = create_production_server(allow_dangerous=_config.allow_dangerous)
         server.run()
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")

@@ -1,6 +1,7 @@
 """mcp-interface: what a real MCP client sees, using an in-memory session against the server object."""
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -34,9 +35,10 @@ def listmonk_env(monkeypatch: pytest.MonkeyPatch, httpx_mock: HTTPXMock) -> None
     httpx_mock.add_response(method="GET", url=f"{BASE_URL}/api/health", json={"data": True})
 
 
-def connect() -> AbstractAsyncContextManager[ClientSession]:
+def connect(allow_dangerous: bool = False) -> AbstractAsyncContextManager[ClientSession]:
     # Opened inside each test: anyio cancel scopes can't span fixture setup/teardown tasks.
-    return create_connected_server_and_client_session(server.create_production_server()._mcp_server)
+    built = server.create_production_server(allow_dangerous=allow_dangerous)
+    return create_connected_server_and_client_session(built._mcp_server)
 
 
 async def test_running_server_lists_tools_resources_and_templates(listmonk_env: None) -> None:
@@ -45,13 +47,47 @@ async def test_running_server_lists_tools_resources_and_templates(listmonk_env: 
         resources = {str(r.uri) for r in (await session.list_resources()).resources}
         templates = {t.uriTemplate for t in (await session.list_resource_templates()).resourceTemplates}
 
-        assert len(tools) >= 70
+        assert len(tools) == 59
+        assert not {t.name for t in tools} & server.DANGEROUS_TOOLS
         assert resources == {
             "listmonk://subscribers", "listmonk://lists", "listmonk://campaigns",
             "listmonk://templates", "listmonk://media",
         }
         assert len(templates) == 8
         assert {"listmonk://subscriber/{subscriber_id}", "listmonk://list/{list_id}/subscribers"} <= templates
+
+
+async def test_hidden_tool_call_is_unknown_and_sends_nothing(
+    listmonk_env: None, httpx_mock: HTTPXMock
+) -> None:
+    async with connect() as session:
+        result = await session.call_tool("reload_app", {})
+
+        assert result.isError is True
+        assert "Unknown tool: reload_app" in text(result)
+        assert [r.url.path for r in httpx_mock.get_requests()] == ["/api/health"]
+
+
+async def test_flag_on_lists_all_71_tools(listmonk_env: None) -> None:
+    async with connect(allow_dangerous=True) as session:
+        tools = {t.name for t in (await session.list_tools()).tools}
+
+        assert len(tools) == 71
+        assert server.DANGEROUS_TOOLS <= tools
+
+
+def test_startup_log_reports_dangerous_tools_setting(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger="listmonk_mcp.server")
+
+    server.create_production_server(allow_dangerous=False)
+    server.create_production_server(allow_dangerous=True)
+
+    lines = [r.getMessage() for r in caplog.records if "Dangerous tools" in r.getMessage()]
+    assert all(r.levelno == logging.INFO for r in caplog.records if "Dangerous tools" in r.getMessage())
+    assert lines == [
+        "Dangerous tools disabled (LISTMONK_MCP_ALLOW_DANGEROUS unset): 12 tools hidden",
+        "Dangerous tools enabled (LISTMONK_MCP_ALLOW_DANGEROUS is set)",
+    ]
 
 
 async def test_resource_read_returns_lists(listmonk_env: None, httpx_mock: HTTPXMock) -> None:
@@ -88,7 +124,7 @@ async def test_listmonk_error_is_mcp_error_with_message(
 async def test_validation_error_is_mcp_error_without_request(
     listmonk_env: None, httpx_mock: HTTPXMock
 ) -> None:
-    async with connect() as session:
+    async with connect(allow_dangerous=True) as session:
         result = await session.call_tool("gc_unconfirmed_subscriptions", {"before_date": "2026-01-01"})
 
         assert result.isError is True
@@ -153,3 +189,29 @@ async def test_read_tool_returns_formatted_text(listmonk_env: None, httpx_mock: 
         pass
     else:
         raise AssertionError("read tool returned raw JSON")
+
+
+async def test_secret_tool_arguments_never_reach_the_log(
+    listmonk_env: None, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    secret = "s3cr3t-value"
+    smtp = {"host": "smtp.invalid", "port": 587, "username": "relay", "password": secret}
+    caplog.set_level(logging.DEBUG)
+    httpx_mock.add_response(
+        method="POST", url=f"{BASE_URL}/api/settings/smtp/test", status_code=400,
+        json={"message": "dial tcp: lookup smtp.invalid: no such host"},
+    )
+
+    async with connect() as session:
+        rejected = await session.call_tool("test_smtp_settings", {"settings": smtp})
+
+        async def boom(*args: object, **kwargs: object) -> dict[str, object]:
+            raise RuntimeError("kaboom")
+
+        monkeypatch.setattr(server.get_client(), "test_smtp_settings", boom)
+        crashed = await session.call_tool("test_smtp_settings", {"settings": smtp})
+
+    assert rejected.isError is True and crashed.isError is True
+    assert any(r.exc_info for r in caplog.records), "the unexpected-error path should log a traceback"
+    assert secret not in caplog.text
+    assert all(secret not in r.getMessage() for r in caplog.records)

@@ -160,6 +160,8 @@ export LISTMONK_MCP_USERNAME=your-api-username
 export LISTMONK_MCP_PASSWORD=your-generated-api-token
 ```
 
+Optional: `LISTMONK_MCP_ALLOW_DANGEROUS` (default `false`). When it is unset or false, the server hides 12 tools that act on every record, act on records chosen by a query, or reload Listmonk: `update_settings`, `update_setting`, `reload_app`, `delete_subscribers_by_query`, `blocklist_subscribers_by_query`, `manage_subscriber_lists_by_query`, `blocklist_bounced_subscribers`, `delete_all_bounces`, `delete_campaigns`, `gc_subscribers`, `gc_campaign_analytics` and `gc_unconfirmed_subscriptions`. Clients don't see them in the tool list, and calling one fails as an unknown tool. Set it to `true` only for a deployment that needs them.
+
 **Important**: The password field should contain the API token (not the user's login password). The server uses Listmonk's token authentication format: `Authorization: token username:api_token`.
 
 **Troubleshooting Configuration**:

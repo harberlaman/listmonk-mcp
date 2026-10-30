@@ -20,6 +20,10 @@ class Config(BaseSettings):
     debug: bool = Field(default=False, description="Enable debug mode")
     log_level: str = Field(default="INFO", description="Logging level")
     server_name: str = Field(default="Listmonk MCP Server", description="Server name")
+    allow_dangerous: bool = Field(
+        default=False,
+        description="Expose tools that act on every record, act by query, or reload Listmonk",
+    )
 
     model_config = SettingsConfigDict(
         env_prefix='LISTMONK_MCP_',

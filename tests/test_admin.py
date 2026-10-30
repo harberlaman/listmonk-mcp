@@ -121,3 +121,57 @@ async def test_health_still_healthy_when_about_fails(
 
     assert "healthy" in result
     assert "Version unavailable: permission denied" in result
+
+
+async def test_get_settings_masks_clear_text_smtp_password(
+    server_client: ListmonkClient, httpx_mock: HTTPXMock
+) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE_URL}/api/settings",
+        json={"data": {"smtp": [{"host": "smtp.example.com", "port": 587, "username": "relay-user",
+                                 "password": "hunter2-real"}]}},
+    )
+
+    result = await server.get_settings()
+
+    assert "hunter2-real" not in result
+    assert "********" in result
+    assert "smtp.example.com" in result and "relay-user" in result
+
+
+def log_lines(count: int) -> list[str]:
+    return [f"2026/10/28 09:00:00 manager.go:{n}: line {n}" for n in range(1, count + 1)]
+
+
+async def test_get_logs_returns_last_100_in_order(server_client: ListmonkClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(method="GET", url=f"{BASE_URL}/api/logs", json={"data": log_lines(4873)})
+
+    result = (await server.get_logs()).splitlines()
+
+    assert result[0] == "Logs: last 100 of 4873 lines"
+    assert result[1:] == log_lines(4873)[-100:]
+
+
+async def test_get_logs_with_fewer_lines_than_requested(
+    server_client: ListmonkClient, httpx_mock: HTTPXMock
+) -> None:
+    httpx_mock.add_response(method="GET", url=f"{BASE_URL}/api/logs", json={"data": log_lines(30)})
+
+    result = (await server.get_logs(lines=100)).splitlines()
+
+    assert result[0] == "Logs: last 30 of 30 lines"
+    assert result[1:] == log_lines(30)
+
+
+@pytest.mark.parametrize("lines", [0, 5001])
+async def test_get_logs_rejects_out_of_range(server_client: ListmonkClient, lines: int) -> None:
+    # pytest-httpx fails the test if any request is sent.
+    with pytest.raises(ToolError, match="^ValidationError: lines must be between 1 and 5000"):
+        await server.get_logs(lines=lines)
+
+
+async def test_get_logs_with_non_list_data(server_client: ListmonkClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(method="GET", url=f"{BASE_URL}/api/logs", json={"data": None})
+
+    assert await server.get_logs() == "Logs: last 0 of 0 lines"

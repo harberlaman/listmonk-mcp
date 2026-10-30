@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 from pytest_httpx import HTTPXMock
 
 from listmonk_mcp import server
@@ -40,17 +42,31 @@ async def test_delete_bounces_with_ids(client: ListmonkClient, httpx_mock: HTTPX
     assert "all" not in request.url.params
 
 
-async def test_delete_bounces_without_ids_deletes_all(
+async def test_delete_bounces_without_ids_is_rejected(server_client: ListmonkClient) -> None:
+    # pytest-httpx fails the test if any request is sent.
+    with pytest.raises(ToolError, match="^ValidationError: At least one bounce ID is required"):
+        await server.delete_bounces([])
+
+
+async def test_delete_all_bounces_sends_all_flag(
     server_client: ListmonkClient, httpx_mock: HTTPXMock
 ) -> None:
     httpx_mock.add_response(method="DELETE", url=f"{BASE_URL}/api/bounces?all=true", json={"data": True})
 
-    result = await server.delete_bounces([])
+    result = await server.delete_all_bounces()
 
     assert json.loads(result) == {"data": True}
 
 
-def test_delete_bounces_description_warns_about_all() -> None:
+def test_delete_bounces_description_says_never_all() -> None:
     tool = server.mcp._tool_manager.get_tool("delete_bounces")
     assert tool is not None
-    assert "no IDs" in tool.description and "ALL bounces" in tool.description
+    assert "At least one ID is required" in tool.description
+    assert "never deletes all bounces" in tool.description
+
+
+def test_delete_all_bounces_description_warns() -> None:
+    tool = server.mcp._tool_manager.get_tool("delete_all_bounces")
+    assert tool is not None
+    assert tool.parameters.get("properties", {}) == {}
+    assert "ALL bounce records" in tool.description

@@ -375,11 +375,13 @@ class ListmonkClient:
         """Delete a single bounce record."""
         return await self._request("DELETE", f"/api/bounces/{bounce_id}")
 
-    async def delete_bounces(self, bounce_ids: list[int] | None = None) -> dict[str, Any]:
-        """Delete bounce records. Pass None or empty list to delete ALL bounces."""
-        if bounce_ids:
-            params = {"id": [str(bid) for bid in bounce_ids]}
-            return await self._request("DELETE", "/api/bounces", params=params)
+    async def delete_bounces(self, bounce_ids: list[int]) -> dict[str, Any]:
+        """Delete the given bounce records (never all; see delete_all_bounces)."""
+        params = {"id": [str(bid) for bid in bounce_ids]}
+        return await self._request("DELETE", "/api/bounces", params=params)
+
+    async def delete_all_bounces(self) -> dict[str, Any]:
+        """Delete ALL bounce records."""
         return await self._request("DELETE", "/api/bounces", params={"all": "true"})
 
     async def blocklist_bounced_subscribers(self) -> dict[str, Any]:

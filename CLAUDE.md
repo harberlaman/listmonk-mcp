@@ -33,16 +33,16 @@ Local Listmonk for manual testing: `docker compose -f docs/listmonk-docker-compo
 
 ## Configuration
 
-`config.py` — pydantic-settings `Config` with env prefix `LISTMONK_MCP_` and automatic `.env` loading. Required: `URL`, `USERNAME`, `PASSWORD`. `PASSWORD` is the Listmonk **API token**, not the login password; the client sends `Authorization: token <username>:<token>`. Optional: `TIMEOUT`, `MAX_RETRIES`, `DEBUG`, `LOG_LEVEL`, `SERVER_NAME`.
+`config.py` — pydantic-settings `Config` with env prefix `LISTMONK_MCP_` and automatic `.env` loading. Required: `URL`, `USERNAME`, `PASSWORD`. `PASSWORD` is the Listmonk **API token**, not the login password; the client sends `Authorization: token <username>:<token>`. Optional: `TIMEOUT`, `MAX_RETRIES`, `DEBUG`, `LOG_LEVEL`, `SERVER_NAME`, `ALLOW_DANGEROUS` (default `false`; exposes the 12 tools in `DANGEROUS_TOOLS`).
 
 ## Architecture
 
 Layers, in call order:
 
-1. **`server.py`** (~2.5k lines, 70 tools, 5 resources and 8 resource templates, almost all of the surface area)
-   - A single module-level `mcp = FastMCP("Listmonk MCP Server", lifespan=lifespan)`; `@mcp.tool()` / `@mcp.resource()` register directly on the server that runs. `create_production_server()` just returns it. The lifespan only runs when the server starts, so importing the module connects to nothing.
-   - `lifespan` loads config, creates/connects the global `_client`, and closes it on shutdown. Tools access it via `get_client()` / `get_config()` module globals.
-   - The typer `cli_app` (`main()` entry point) calls `create_production_server().run()`.
+1. **`server.py`** (~2.5k lines, 71 tools (59 exposed by default), 5 resources and 8 resource templates, almost all of the surface area)
+   - A single module-level `mcp = GuardedFastMCP("Listmonk MCP Server", lifespan=lifespan)`; `@mcp.tool()` / `@mcp.resource()` register directly on the server that runs. `GuardedFastMCP` hides the names in `hidden_tools` from `list_tools` and answers `call_tool` for them with `Unknown tool`; the tools stay registered, so tests can still read them from `mcp._tool_manager`. `create_production_server(allow_dangerous=False)` sets `hidden_tools` to `DANGEROUS_TOOLS` (or nothing), checks every name is registered, logs one INFO line and returns `mcp`. The lifespan only runs when the server starts, so importing the module connects to nothing.
+   - `lifespan` reuses the config `run()` loaded (or loads it), creates/connects the global `_client`, and closes it on shutdown. Tools access it via `get_client()` / `get_config()` module globals.
+   - The typer `cli_app` (`main()` entry point) loads config, then calls `create_production_server(allow_dangerous=config.allow_dangerous).run()`.
 
 2. **`client.py`**: `ListmonkClient`, an async httpx wrapper with one method per Listmonk endpoint. `connect()` performs a health check, so the server fails at startup if Listmonk is unreachable or credentials are wrong. `_request()` retries only on `httpx.RequestError` (network errors) with exponential backoff; non-2xx responses raise `ListmonkAPIError` immediately. The shared client sets **no default `Content-Type`**: `_request` sends `json_data` as JSON (typed `Any`, because e.g. `PUT /api/settings/{key}` takes a raw value), `form_data` form-encoded, and `form_data` + `files` as multipart. All uploads go through it; don't create one-off `AsyncClient`s. Non-JSON responses (HTML previews) come back as `{"text": ...}`.
 
@@ -50,7 +50,9 @@ Layers, in call order:
 
 4. **`uploads.py`**: `resolve_upload` (exactly one of `content_base64` + `filename` or `file_path`; strict base64; extension allow-list; size cap) and `decode_base64`. Media allows png/jpg/jpeg/gif/webp up to 5 MB (no SVG); imports allow csv/zip up to 10 MB.
 
-5. **`models.py`**: Pydantic models/enums. Re-exported from `__init__.py` but **not used by `server.py` or `client.py`**; tools take primitive args (plus `TxAttachment` in `server.py`) and the client returns raw `dict[str, Any]`.
+5. **`masking.py`**: `mask_settings`, used by `get_settings`: replaces non-empty values whose key contains `password`/`secret`, plus `bounce.sendgrid_key` and the `key` of `bounce.forwardemail`/`bounce.lettermint`, with `********`. Empty values stay empty.
+
+6. **`models.py`**: Pydantic models/enums. Re-exported from `__init__.py` but **not used by `server.py` or `client.py`**; tools take primitive args (plus `TxAttachment` in `server.py`) and the client returns raw `dict[str, Any]`.
 
 ### Conventions for tools and resources
 
@@ -58,6 +60,6 @@ Layers, in call order:
 - **Errors:** never return an error string from a tool. Raise `ValidationError` (from `exceptions.py`) for input that must be rejected before any request; let `ListmonkAPIError` propagate. `run_tool` logs and re-raises everything as `ToolError("<Type>: <message>")`, which clients see as `isError: true`; tracebacks stay in the server log.
 - **Return values:** tools that change state (non-GET, except `preview_template_body`) return `listmonk_json(<Listmonk response>)`, never a made-up "Successfully ..." message. Read tools return formatted text. List-subscriber output goes through `format_subscribers`.
 - Resources use `listmonk://...` URIs, take path params as `str` (cast to `int` themselves), catch `ListmonkAPIError` directly, and return Markdown-formatted strings (including their error text).
-- Adding an endpoint: add a method to `ListmonkClient`, then a tool/resource in `server.py` following the pattern above, and update `tests/test_registration.py` (it pins the tool count). mypy runs in `strict` mode, so everything needs full type annotations.
+- Adding an endpoint: add a method to `ListmonkClient`, then a tool/resource in `server.py` following the pattern above, and update `tests/test_registration.py` (it pins the exposed tool counts, 59 by default and 71 with the flag; list tools with `await server.list_tools()`, not `_tool_manager`). Decide whether the new tool belongs in `DANGEROUS_TOOLS`: it does if it acts on every record or on records chosen by a query, or reloads Listmonk. mypy runs in `strict` mode, so everything needs full type annotations.
 - Verify request and response shapes against the Listmonk handlers for the target version (`knadh/listmonk`, `cmd/*.go` and `models/*.go` at the release tag), not only the docs. Several endpoints read form fields or query params rather than JSON, some ignore body fields entirely, `/api/about` is returned without a `data` wrapper, v6.2.0 has no media update route, and `PUT /api/settings` / `PUT /api/settings/{key}` reload Listmonk unless a campaign is running.
 - Media URLs returned by Listmonk are built from its `root_url` setting.
