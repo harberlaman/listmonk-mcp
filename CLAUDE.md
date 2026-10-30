@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-MCP server (Python 3.11+, FastMCP) that exposes a Listmonk instance's REST API as MCP tools and resources. Packaged with hatchling, published to PyPI as `listmonk-mcp`. This repo is a fork of `rhnvrm/listmonk-mcp`.
+MCP server (Python 3.11+, FastMCP) that exposes a Listmonk instance's REST API as MCP tools and resources. Packaged with hatchling as `listmonk-mcp`. This repo is a separate fork of `rhnvrm/listmonk-mcp`: it is not published to PyPI (upstream owns that name) and is not sent back upstream.
 
 ## Commands
 
@@ -27,7 +27,7 @@ uv run pytest tests/test_templates.py::test_explicit_subject_replaces_stored_sub
 
 Tests mock Listmonk with pytest-httpx; nothing talks to a real server. `tests/conftest.py` provides `client` (a `ListmonkClient` with an open session, skipping `connect()`'s health check) and `server_client` (the same client installed as `server._client`, so `@mcp.tool` functions can be awaited directly). pytest-httpx fails a test on any request that has no matching mocked response, which is how "no request sent" is asserted.
 
-CI (`.github/workflows/publish.yml`) only runs on `v*` tags: ruff → mypy → build → PyPI trusted publish → GitHub release. Lint/type checks do not run on push or PR. Release = bump `version` in `pyproject.toml`, commit, tag `vX.Y.Z`, push tag. `docs.yml` builds the mkdocs site from `docs/` on pushes/PRs to `master` that touch the docs.
+CI (`.github/workflows/publish.yml`) only runs on `v*` tags: ruff → mypy → build → GitHub release. Lint/type checks do not run on push or PR. Versions are the upstream base plus a PEP 440 local suffix (`0.2.0+hl.1`, then `+hl.2`, ...), so they never collide with an upstream release. Release = bump `version` in `pyproject.toml` and `__version__`, run `uv lock`, update the CHANGELOG heading, commit, tag `v<version>` (e.g. `v0.2.0+hl.1`), push the tag. `docs.yml` builds the mkdocs site from `docs/` on pushes/PRs to `master` that touch the docs.
 
 Local Listmonk for manual testing: `docker compose -f docs/listmonk-docker-compose.yml up -d` (http://localhost:9000, admin/listmonk), then create an API user + token in Admin → Users.
 

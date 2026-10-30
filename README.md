@@ -103,18 +103,20 @@ listmonk-mcp --help
 To release a new version:
 
 ```bash
-# 1. Update version in pyproject.toml (e.g., 0.0.1 -> 0.0.2)
+# 1. Update the version in pyproject.toml and src/listmonk_mcp/__init__.py
+#    (fork versions: upstream base + local suffix, e.g. 0.2.0+hl.1 -> 0.2.0+hl.2), then run `uv lock`
 # 2. Commit and tag
-git add pyproject.toml
-git commit -m "chore: bump version to 0.0.2"
-git tag v0.0.2
+git add pyproject.toml src/listmonk_mcp/__init__.py uv.lock CHANGELOG.md
+git commit -m "chore: release 0.2.0+hl.2"
+git tag v0.2.0+hl.2
 git push origin master
-git push origin v0.0.2
+git push origin v0.2.0+hl.2
 
 # GitHub Actions will automatically:
 # - Run linting and type checking
-# - Build and publish to PyPI  
-# - Create GitHub release with auto-generated notes
+# - Build the package
+# - Create a GitHub release with auto-generated notes
+# This fork is not published to PyPI.
 ```
 
 ## Quick Start

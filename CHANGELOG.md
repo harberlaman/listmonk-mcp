@@ -2,7 +2,7 @@
 
 Changes to this fork of [`rhnvrm/listmonk-mcp`](https://github.com/rhnvrm/listmonk-mcp), newest first. Breaking changes are marked **BREAKING**. Planning records for each change are in `openspec/changes/archive/`.
 
-## [Unreleased] (0.2.0)
+## [0.2.0+hl.1] - 2026-10-30
 
 Built on upstream v0.1.0 and tested against Listmonk v6.2.0.
 

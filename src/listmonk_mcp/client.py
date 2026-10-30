@@ -46,7 +46,7 @@ class ListmonkClient:
             timeout=self.config.timeout,
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
             headers={
-                "User-Agent": "Listmonk-MCP-Server/0.1.0",
+                "User-Agent": "Listmonk-MCP-Server/0.2.0+hl.1",
                 "Accept": "application/json",
                 # No default Content-Type: httpx sets JSON, form or multipart per request.
                 "Authorization": f"token {auth_token}"
