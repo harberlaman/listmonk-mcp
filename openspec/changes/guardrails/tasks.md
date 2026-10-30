@@ -78,7 +78,8 @@
     - flag `true`: 71 tools, including `delete_all_bounces`
   - Also checked from stderr: the startup line `Dangerous tools disabled (LISTMONK_MCP_ALLOW_DANGEROUS unset): 12 tools hidden`, and `LISTMONK_MCP_ALLOW_DANGEROUS=maybe` exits 1 with a `bool_parsing` config error.
   - Torn down with `down -v`; the compose file, credentials and driver were deleted.
-- [ ] 4.4 Commit to `master` and push with no tags, after scanning the outgoing history for internal host and container names. Verify: `git status -sb` is level with `origin/master`, and the scan finds nothing.
+- [x] 4.4 Commit to `master` and push with no tags, after scanning the outgoing history for internal host and container names. Verify: `git status -sb` is level with `origin/master`, and the scan finds nothing.
+  - The scan of the outgoing diff and of the unpushed `6908bb0` (fix-core-tools archive) found no internal host, container or user names. Pushed `45314f4..a54bb06` with no tags; the remote tags are still only `v0.0.1`, `v0.0.2` and `v0.1.0`.
 
 ## Workflow follow-up
 
